@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>Drive Town — городок ПДД</title>
+    <script type="module" crossorigin src="./assets/index-titvPpm3.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-etmBVz63.css">
+  </head>
+  <body>
+    <canvas id="game"></canvas>
+    <canvas id="minimap" width="200" height="200" title="Карта города"></canvas>
+    <div id="hud">
+      <div class="hud-pill" id="level" title="Номер уровня">🏙 <span data-value="level">1</span></div>
+      <div class="hud-pill" id="time" title="Время уровня">⏱ <span data-value="time">0:00</span></div>
+      <div class="hud-pill" id="speed" title="Скорость">🚗 <span data-value="speed">0</span> км/ч</div>
+      <div class="hud-pill" id="violations" title="Нарушения на уровне">❗ <span data-value="violations">0</span></div>
+      <div class="hud-pill" id="dist" title="До цели по прямой">🚩 <span data-value="dist">0</span> м</div>
+      <div class="hud-pill" id="score" title="Всего очков">🏆 <span data-value="score">0</span></div>
+      <button class="hud-pill" id="btn-retry" type="button" title="Начать уровень заново (R)">↻</button>
+    </div>
+    <div id="toast" hidden></div>
+    <div id="result-overlay" hidden>
+      <div class="card">
+        <h2 class="won">🏁 Уровень пройден!</h2>
+        <p class="stats-row">Время: <b data-value="result-time"></b></p>
+        <p class="stats-row">Нарушений: <b data-value="result-violations"></b></p>
+        <p class="violation-list" data-value="result-violation-list"></p>
+        <p class="stats-row score">Очки за уровень: <b data-value="result-score"></b></p>
+        <p class="stats-row">Всего: <b data-value="result-total"></b></p>
+        <div class="actions">
+          <button id="btn-overlay-next" type="button">→ Новый город (N)</button>
+        </div>
+      </div>
+    </div>
+    <div id="mobile-controls">
+      <div id="ctl-left">
+        <button id="btn-accel" aria-label="Газ">▲</button>
+        <button id="btn-reverse" aria-label="Тормоз / задний ход">▼</button>
+      </div>
+      <div id="ctl-right">
+        <button id="btn-steer-left" aria-label="Руль влево">◀</button>
+        <button id="btn-steer-right" aria-label="Руль вправо">▶</button>
+      </div>
+    </div>
+  </body>
+</html>
