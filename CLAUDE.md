@@ -14,25 +14,12 @@ npm run lint           # eslint; `as`-касты ЗАПРЕЩЕНЫ (assertionSt
 npx tsc --noEmit       # строгие типы
 npm run dev            # Vite на :5173; ?seed=123 — фиксированный город
 npm run build          # tsc + сборка в ./docs (GitHub Pages)
+npm run shot -- 7 --drive 4 [--drift|--zoomout 8|--mobile]  # скриншоты в ./shots
 ```
 
 Процесс — TDD: сначала тест, потом код. UI-тексты — на русском.
-
-Скриншоты (в проекте нет playwright — берётся из соседнего проекта):
-
-```js
-// node <файл>.mjs при запущенном `npx vite --port 5199`
-import { chromium } from '../driving-trainer/node_modules/playwright/index.mjs';
-const browser = await chromium.launch();
-const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
-await page.goto('http://localhost:5199/?seed=7');
-await page.waitForTimeout(1500);
-await page.keyboard.down('ArrowUp');       // газ; Space — ручник
-await page.waitForTimeout(3000);
-await page.mouse.wheel(0, 200);            // отдалить камеру (мышь над канвасом)
-await page.screenshot({ path: 'shot.png' });
-await browser.close();
-```
+Одноразовые отладочные скрипты (симуляции без vitest): глобальный `tsx` —
+`tsx script.ts` понимает импорты из src/ напрямую.
 
 ## Карта модулей
 

@@ -109,6 +109,7 @@ SWEEP=40 npm test      # + широкий свип автопилота по 40 
 npm run lint           # ESLint (`as`-касты запрещены)
 npm run dev            # http://localhost:5173
 npm run build          # tsc + сборка в ./docs (GitHub Pages)
+npm run shot -- 7 --drive 4   # скриншоты города в ./shots (headless Chromium)
 ```
 
 **TDD.** Тесты пишутся раньше кода; движковые модули (`game/`) покрыты юнит-тестами, разрешимость сгенерированных уровней проверяется автопилотом (`completable.test.ts`). Рендер и DOM — вручную.
