@@ -10,8 +10,8 @@ export const GOAL_RADIUS = 7;
 export const MIN_GOAL_HOPS = 5;
 
 /** Размер решётки города (сложность уровней одинаковая). */
-const COLS = 7;
-const ROWS = 5;
+const COLS = 8;
+const ROWS = 6;
 /** Разброс длины квартала, м. */
 const BLOCK_MIN = 55;
 const BLOCK_MAX = 95;
@@ -69,16 +69,56 @@ export function generateLevel(seed: number): Level {
     if (rng() < EXTRA_EDGE_P) edges.push({ ...e });
   }
 
-  // односторонние улицы — только пока город остаётся строго связным
+  // односторонние улицы — целыми «улицами»: цепочка рёбер сквозь узлы
+  // степени 2 ориентируется в одну сторону разом. Стык односторонки с
+  // двусторонкой посреди улицы (не на перекрёстке) — ловушка: встречному
+  // потоку негде свернуть. И только пока город остаётся строго связным.
+  const nodeEdgeIds: number[][] = nodes.map(() => []);
+  edges.forEach((e, k) => {
+    nodeEdgeIds[e.a].push(k);
+    nodeEdgeIds[e.b].push(k);
+  });
+  const otherEnd = (eid: number, n: number): number =>
+    edges[eid].a === n ? edges[eid].b : edges[eid].a;
+  const extend = (visited: Set<number>, acc: number[], eid: number, n: number): void => {
+    while (nodeEdgeIds[n].length === 2) {
+      const next = nodeEdgeIds[n].find((k) => k !== eid);
+      if (next === undefined || visited.has(next)) return;
+      visited.add(next);
+      acc.push(next);
+      eid = next;
+      n = otherEnd(next, n);
+    }
+  };
   const oneWayCount = Math.round(edges.length * ONE_WAY_P);
   let made = 0;
   for (const i of shuffle(rng, edges.map((_, k) => k))) {
     if (made >= oneWayCount) break;
-    const e = edges[i];
-    if (rng() < 0.5) [e.a, e.b] = [e.b, e.a];
-    e.oneWay = true;
-    if (stronglyConnected(nodes.length, edges)) made++;
-    else delete e.oneWay;
+    if (edges[i].oneWay) continue;
+    const visited = new Set([i]);
+    const after: number[] = [];
+    const before: number[] = [];
+    extend(visited, after, i, edges[i].b);
+    extend(visited, before, i, edges[i].a);
+    const chain = [...before.reverse(), i, ...after];
+    if (rng() < 0.5) chain.reverse();
+    // узел-начало цепочки: конец первого ребра, НЕ общий со вторым
+    const first = edges[chain[0]];
+    let from: number;
+    if (chain.length === 1) {
+      from = rng() < 0.5 ? first.a : first.b;
+    } else {
+      const second = edges[chain[1]];
+      from = first.a === second.a || first.a === second.b ? first.b : first.a;
+    }
+    for (const k of chain) {
+      const e = edges[k];
+      if (e.a !== from) [e.a, e.b] = [e.b, e.a];
+      e.oneWay = true;
+      from = e.b;
+    }
+    if (stronglyConnected(nodes.length, edges)) made += chain.length;
+    else for (const k of chain) delete edges[k].oneWay;
   }
 
   // регулирование перекрёстков (degree >= 3)

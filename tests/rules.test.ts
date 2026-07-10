@@ -174,6 +174,29 @@ describe('Rules: приоритет', () => {
     expect(vs).toContain('priority');
   });
 
+  it('встречный, появившийся когда поворот уже идёт, прощается', () => {
+    const map = cross({ control: 'none' });
+    const mon = new RuleMonitor(map);
+    // въезжаем в квадрат при пустой дороге, манёвр уже идёт...
+    const commit = [
+      ...northRun(20, 5, 5),
+      { x: 2, y: 2, heading: N + 0.5, speed: 5 },
+    ];
+    // ...и только теперь на встречной появляется машина
+    const oncoming = actor(-2.25, -9, S, 6, 1);
+    const finish = [
+      { x: 0, y: 0.5, heading: W - 0.7, speed: 5 },
+      { x: -3, y: -1.5, heading: W - 0.3, speed: 5 },
+      { x: -6, y: -2.25, heading: W, speed: 5 },
+      { x: -12, y: -2.25, heading: W, speed: 5 },
+    ];
+    const vs = [
+      ...drive(mon, commit),
+      ...drive(mon, finish, { vehicles: [oncoming] }),
+    ];
+    expect(vs).not.toContain('priority');
+  });
+
   it('прямо при встречном — не нарушение', () => {
     const map = cross({ control: 'none' });
     const mon = new RuleMonitor(map);

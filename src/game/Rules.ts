@@ -74,7 +74,8 @@ export class RuleMonitor {
   private inNode: {
     node: number;
     entrySide: Dir | null;
-    entered: boolean;
+    /** Манёвр начался: игрок движется в квадрате, приоритет зафиксирован. */
+    committed: boolean;
     oncomingSeen: boolean;
   } | null = null;
 
@@ -161,16 +162,18 @@ export class RuleMonitor {
           : approach && approach.node === nodeIn
             ? approach.side
             : null;
-      this.inNode = { node: nodeIn, entrySide, entered: true, oncomingSeen: false };
+      this.inNode = { node: nodeIn, entrySide, committed: false, oncomingSeen: false };
       if (entrySide !== null && moving) {
         const type = this.entryConflict(nodeIn, entrySide, vehicles);
         if (type) emit(type);
       }
     }
-    if (this.inNode && this.inNode.entrySide !== null) {
-      if (this.hasOncoming(this.inNode.node, this.inNode.entrySide, vehicles)) {
-        this.inNode.oncomingSeen = true;
-      }
+    if (this.inNode && this.inNode.entrySide !== null && !this.inNode.committed) {
+      // встречный при левом повороте — на момент НАЧАЛА манёвра: при въезде
+      // в квадрат или трогании после остановки в нём. Появившийся позже,
+      // когда поворот уже идёт, уступает сам (ср. прощение жёлтого)
+      this.inNode.oncomingSeen = this.hasOncoming(this.inNode.node, this.inNode.entrySide, vehicles);
+      if (moving) this.inNode.committed = true;
     }
 
     // --- скорость ---

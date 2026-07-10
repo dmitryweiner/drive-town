@@ -112,6 +112,35 @@ describe('generateLevel: инварианты для пачки seed', () => {
   }
 });
 
+describe('generateLevel: односторонки целыми улицами', () => {
+  it('на узлах без перекрёстка (degree <= 2) режим движения непрерывен', () => {
+    for (let seed = 1; seed <= 60; seed++) {
+      const m = generateLevel(seed).map;
+      m.nodes.forEach((_, id) => {
+        const eids = Object.values(m.nodeEdges(id)).filter(
+          (k): k is number => k !== undefined,
+        );
+        const msg = `seed=${seed}, узел ${id}`;
+        // тупик: односторонка в тупик — ловушка
+        if (eids.length === 1) {
+          expect(m.edges[eids[0]].oneWay, msg).toBeUndefined();
+          return;
+        }
+        if (eids.length !== 2) return;
+        // стык «односторонка ↔ двусторонка» посреди улицы запрещён:
+        // встречному потоку негде свернуть
+        const [e1, e2] = eids.map((k) => m.edges[k]);
+        expect(Boolean(e1.oneWay), msg).toBe(Boolean(e2.oneWay));
+        // обе односторонние — поток сквозной: одна входит, другая выходит
+        if (e1.oneWay && e2.oneWay) {
+          const into = [e1, e2].filter((e) => e.b === id).length;
+          expect(into, msg).toBe(1);
+        }
+      });
+    }
+  });
+});
+
 describe('generateLevel: дороги не наезжают друг на друга', () => {
   it('параллельные улицы разнесены минимум на ширину дома', () => {
     for (const seed of SEEDS) {
