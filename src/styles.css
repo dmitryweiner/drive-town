@@ -55,6 +55,18 @@ html, body { margin: 0; padding: 0; height: 100%; width: 100%; overflow: hidden;
 #hud [data-value] { text-align: right; }
 #violations { color: var(--lost); }
 #score { color: #ffd75e; }
+#btn-reset {
+  border: none;
+  background: none;
+  padding: 0;
+  margin-left: 2px;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.55;
+  -webkit-tap-highlight-color: transparent;
+}
+#btn-reset:hover { opacity: 1; }
 
 #btn-retry {
   cursor: pointer;

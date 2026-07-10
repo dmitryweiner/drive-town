@@ -23,8 +23,15 @@ const VIEW_M = 72;
 const GRASS = '#2c4034';
 const ASPHALT = '#3a3f4a';
 const MARK = '#e8e8e8';
-const BUILDING = '#4d4438';
-const BUILDING_EDGE = '#6b5f4c';
+/** Дома: приглушённые «городские» цвета; крыша чуть светлее стен. */
+const BUILDING_PALETTE: { wall: string; roof: string }[] = [
+  { wall: '#7a5c48', roof: '#8f705a' }, // кирпичный
+  { wall: '#6e7078', roof: '#83858e' }, // серый
+  { wall: '#8a7a5c', roof: '#a09070' }, // бежевый
+  { wall: '#5d6b58', roof: '#71816b' }, // оливковый
+  { wall: '#7d5a5a', roof: '#946f6f' }, // терракотовый
+  { wall: '#5a6b7d', roof: '#6f8394' }, // сине-серый
+];
 
 export class Renderer {
   private zoom = 1;
@@ -103,14 +110,20 @@ export class Renderer {
       ctx.fillRect(b.xMin, b.yMin, b.xMax - b.xMin, b.yMax - b.yMin);
     }
 
-    // дома
-    for (const bld of map.buildings) {
-      ctx.fillStyle = BUILDING;
-      ctx.fillRect(bld.xMin, bld.yMin, bld.xMax - bld.xMin, bld.yMax - bld.yMin);
-      ctx.strokeStyle = BUILDING_EDGE;
-      ctx.lineWidth = 0.5;
-      ctx.strokeRect(bld.xMin + 0.25, bld.yMin + 0.25, bld.xMax - bld.xMin - 0.5, bld.yMax - bld.yMin - 0.5);
-    }
+    // дома: цвет детерминирован индексом, «крыша» — внутренний прямоугольник
+    map.buildings.forEach((bld, i) => {
+      const c = BUILDING_PALETTE[i % BUILDING_PALETTE.length];
+      const w = bld.xMax - bld.xMin;
+      const h = bld.yMax - bld.yMin;
+      ctx.fillStyle = c.wall;
+      ctx.fillRect(bld.xMin, bld.yMin, w, h);
+      const in1 = Math.min(1.6, w / 4, h / 4);
+      ctx.fillStyle = c.roof;
+      ctx.fillRect(bld.xMin + in1, bld.yMin + in1, w - 2 * in1, h - 2 * in1);
+      ctx.strokeStyle = 'rgba(0,0,0,0.35)';
+      ctx.lineWidth = 0.35;
+      ctx.strokeRect(bld.xMin, bld.yMin, w, h);
+    });
 
     // разметка рёбер
     for (let i = 0; i < map.edges.length; i++) this.drawEdgeMarkings(ctx, map, i);
@@ -258,6 +271,23 @@ export class Renderer {
   // ==== знаки и светофоры ====
 
   private drawFurniture(ctx: CanvasRenderingContext2D, map: CityMap, time: number): void {
+    // занятые места (светофоры и знаки): новые знаки при пересечении
+    // сдвигаются вдоль дороги, чтобы ничего не закрывать
+    const placed: Vec2[] = [];
+    const occupy = (p: Vec2): void => {
+      placed.push(p);
+    };
+    const placeSign = (pos: Vec2, away: Vec2, num: string): void => {
+      const p = { ...pos };
+      let guard = 0;
+      while (placed.some((q) => Math.hypot(q.x - p.x, q.y - p.y) < 3.4) && guard++ < 4) {
+        p.x += away.x * 3.4;
+        p.y += away.y * 3.4;
+      }
+      occupy(p);
+      drawSign(ctx, p.x, p.y, num);
+    };
+
     for (let i = 0; i < map.nodes.length; i++) {
       const n = map.nodes[i];
       for (const side of SIDES) {
@@ -266,10 +296,12 @@ export class Renderer {
         const canEnter = map.canTravel(edgeId, map.otherNode(edgeId, i));
         const pos = signPos(n, side, 0);
         if (n.control === 'lights' && canEnter) {
+          occupy(pos);
           drawTrafficLight(ctx, pos.x, pos.y, map.lightState(i, side, time) ?? 'red');
           continue;
         }
         if (n.control === 'priority' && canEnter) {
+          occupy(pos);
           drawSign(ctx, pos.x, pos.y, isMinor(n.mainAxis, side) ? (n.minorSign === 'stop' ? '302' : '301') : '309');
         }
       }
@@ -287,26 +319,26 @@ export class Renderer {
           y: a.y + u.y * along + rt.y * (HALF_ROAD + 1.6),
         };
       };
+      if (e.oneWay) {
+        // «одностороннее движение» — в начале, «въезд запрещён» — лицом
+        // к нарушителю с конца b; оба подальше от перекрёстков, чтобы
+        // не закрывать светофоры соседних подъездов
+        placeSign(at(HALF_ROAD + 8, 1), u, '618');
+        placeSign(at(len - HALF_ROAD - 8, -1), { x: -u.x, y: -u.y }, '402');
+      }
       if (e.speedLimit !== undefined) {
         for (const dirSign of map.allowedDirSigns(i)) {
-          const along = dirSign > 0 ? HALF_ROAD + 3 : len - HALF_ROAD - 3;
-          const p = at(along, dirSign);
-          drawSign(ctx, p.x, p.y, `426-${e.speedLimit}`);
+          const along = dirSign > 0 ? HALF_ROAD + 4.5 : len - HALF_ROAD - 4.5;
+          const dir = { x: u.x * dirSign, y: u.y * dirSign };
+          placeSign(at(along, dirSign), dir, `426-${e.speedLimit}`);
         }
-      }
-      if (e.oneWay) {
-        // «въезд запрещён» лицом к нарушителю с конца b
-        const pNo = at(len - HALF_ROAD - 2, -1);
-        drawSign(ctx, pNo.x, pNo.y, '402');
-        const pOne = at(HALF_ROAD + 2, 1);
-        drawSign(ctx, pOne.x, pOne.y, '618');
       }
       for (const cw of map.crosswalks()) {
         if (cw.edge !== i) continue;
         for (const dirSign of map.allowedDirSigns(i)) {
           const along = cw.at - dirSign * (CROSSWALK_LEN / 2 + 4);
-          const p = at(along, dirSign);
-          drawSign(ctx, p.x, p.y, '306');
+          const back = { x: -u.x * dirSign, y: -u.y * dirSign };
+          placeSign(at(along, dirSign), back, '306');
         }
       }
     }

@@ -12,7 +12,7 @@ export const PAR_SPEED = 7;
 export const BASE_SCORE = 1000;
 export const VIOLATION_PENALTY = 150;
 /** Машин NPC на уровне. */
-export const TRAFFIC_COUNT = 12;
+export const TRAFFIC_COUNT = 18;
 
 /** Очки за уровень: чистый и быстрый проезд = BASE_SCORE; время сверх
  * par-времени срезает пропорционально, каждое нарушение — фикс. штраф. */
@@ -34,7 +34,8 @@ export class Round {
 
   constructor(plan: Level, opts: { trafficCount?: number } = {}) {
     this.plan = plan;
-    this.car = new Car({ x: plan.spawn.x, y: plan.spawn.y, heading: plan.spawn.heading });
+    // steerRate: руль с ограниченной скоростью — мягче реагирует на стрелки
+    this.car = new Car({ x: plan.spawn.x, y: plan.spawn.y, heading: plan.spawn.heading, steerRate: 2.8 });
     this.rules = new RuleMonitor(plan.map);
     const count = opts.trafficCount ?? TRAFFIC_COUNT;
     this.traffic = Traffic.random(plan.map, mulberry32(plan.seed * 7919 + 17), count, [

@@ -64,6 +64,15 @@ function newSeed(): number {
   return Math.floor(Math.random() * 2 ** 31);
 }
 
+// сброс прогресса: уровень 1, очки 0, новый город
+document.getElementById('btn-reset')?.addEventListener('click', () => {
+  if (!window.confirm('Сбросить прогресс (уровень и очки)?')) return;
+  save = { level: 1, total: 0, seed: newSeed() };
+  persist();
+  round = new Round(generateLevel(save.seed));
+  scoreBanked = false;
+});
+
 function isMobile(): boolean {
   if (window.matchMedia('(hover: none) and (pointer: coarse)').matches) return true;
   const hasTouch = 'ontouchstart' in window || (navigator.maxTouchPoints ?? 0) > 0;

@@ -1,5 +1,32 @@
 import { describe, it, expect } from 'vitest';
-import { Car } from '../src/game/Car';
+import { Car, type CarInput } from '../src/game/Car';
+
+const DT = 1 / 60;
+
+function run(car: Car, ticks: number, input: Partial<CarInput>): void {
+  for (let i = 0; i < ticks; i++) {
+    car.update(DT, { throttle: 0, brake: 0, steer: 0, ...input });
+  }
+}
+
+/** Угол между движением ЗАДНЕЙ ОСИ и осью кузова: без заноса задние
+ * колёса катятся вдоль кузова (центр в повороте сносит геометрически). */
+function slipAngle(car: Car, input: Partial<CarInput>): number {
+  const rearOf = (): { x: number; y: number } => ({
+    x: car.position.x - (car.wheelBase / 2) * Math.cos(car.heading),
+    y: car.position.y - (car.wheelBase / 2) * Math.sin(car.heading),
+  });
+  const before = rearOf();
+  car.update(DT, { throttle: 0, brake: 0, steer: 0, ...input });
+  const after = rearOf();
+  const dx = after.x - before.x;
+  const dy = after.y - before.y;
+  if (Math.hypot(dx, dy) < 1e-6) return 0;
+  let d = Math.atan2(dy, dx) - car.heading;
+  while (d > Math.PI) d -= 2 * Math.PI;
+  while (d < -Math.PI) d += 2 * Math.PI;
+  return Math.abs(d);
+}
 
 describe('Car physics', () => {
   it('starts at rest at the configured position and heading', () => {
@@ -86,6 +113,63 @@ describe('Car physics', () => {
     expect(xs[3]).toBeCloseTo(1);
     expect(ys[0]).toBeCloseTo(-2);
     expect(ys[3]).toBeCloseTo(2);
+  });
+
+  it('плавный руль: без steerRate угол меняется мгновенно', () => {
+    const car = new Car({ x: 0, y: 0, heading: 0 });
+    car.update(DT, { throttle: 1, brake: 0, steer: 1 });
+    expect(car.steeringAngle).toBeCloseTo(0.6);
+  });
+
+  it('плавный руль: со steerRate угол нарастает постепенно', () => {
+    const car = new Car({ x: 0, y: 0, heading: 0, steerRate: 2 });
+    car.update(DT, { throttle: 1, brake: 0, steer: 1 });
+    expect(car.steeringAngle).toBeCloseTo(2 * DT, 5);
+    run(car, 60, { throttle: 1, steer: 1 });
+    expect(car.steeringAngle).toBeCloseTo(0.6);
+    // возврат к нулю тоже ограничен по скорости
+    car.update(DT, { throttle: 1, brake: 0, steer: 0 });
+    expect(car.steeringAngle).toBeCloseTo(0.6 - 2 * DT, 5);
+  });
+
+  it('ручник замедляет быстрее, чем накат', () => {
+    const coast = new Car({ x: 0, y: 0, heading: 0 });
+    run(coast, 120, { throttle: 1 });
+    run(coast, 60, {});
+    const hand = new Car({ x: 0, y: 0, heading: 0 });
+    run(hand, 120, { throttle: 1 });
+    run(hand, 60, { handbrake: 1 });
+    expect(hand.velocity).toBeLessThan(coast.velocity - 1.5);
+  });
+
+  it('ручник в покое не включает задний ход', () => {
+    const car = new Car({ x: 0, y: 0, heading: 0 });
+    run(car, 60, { handbrake: 1 });
+    expect(Math.abs(car.velocity)).toBeLessThan(1e-6);
+    expect(Math.abs(car.position.x)).toBeLessThan(1e-6);
+  });
+
+  it('занос: руль + ручник — машину несёт боком', () => {
+    const car = new Car({ x: 0, y: 0, heading: 0 });
+    run(car, 180, { throttle: 1 });
+    run(car, 30, { steer: 1, handbrake: 1 });
+    const slip = slipAngle(car, { steer: 1, handbrake: 1 });
+    expect(slip).toBeGreaterThan(0.15);
+  });
+
+  it('без ручника в повороте заноса нет', () => {
+    const car = new Car({ x: 0, y: 0, heading: 0 });
+    run(car, 180, { throttle: 1 });
+    run(car, 30, { steer: 1 });
+    expect(slipAngle(car, { steer: 1 })).toBeLessThan(0.05);
+  });
+
+  it('после отпускания ручника скольжение гаснет', () => {
+    const car = new Car({ x: 0, y: 0, heading: 0 });
+    run(car, 180, { throttle: 1 });
+    run(car, 30, { steer: 1, handbrake: 1 });
+    run(car, 60, { throttle: 0.5 });
+    expect(slipAngle(car, { throttle: 0.5 })).toBeLessThan(0.04);
   });
 
   it('pivots around the rear axle, not the body center, while steering', () => {

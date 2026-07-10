@@ -17,6 +17,7 @@ export class Input {
   private touchSteer = 0;
   private touchThrottle = 0;
   private touchBrake = 0;
+  private touchHandbrake = 0;
   retryRequested = false;
   nextRequested = false;
 
@@ -34,8 +35,9 @@ export class Input {
 
   read(): CarInput {
     const throttleKey = this.pressed.has('ArrowUp') || this.pressed.has('KeyW') ? 1 : 0;
-    const brakeKey =
-      this.pressed.has('ArrowDown') || this.pressed.has('KeyS') || this.pressed.has('Space') ? 1 : 0;
+    const brakeKey = this.pressed.has('ArrowDown') || this.pressed.has('KeyS') ? 1 : 0;
+    // Space — ручной тормоз (занос), обычный тормоз — S/↓
+    const handbrakeKey = this.pressed.has('Space') ? 1 : 0;
     const steerKey =
       (this.pressed.has('ArrowLeft') || this.pressed.has('KeyA') ? -1 : 0) +
       (this.pressed.has('ArrowRight') || this.pressed.has('KeyD') ? 1 : 0);
@@ -44,6 +46,7 @@ export class Input {
       throttle: Math.max(throttleKey, this.touchThrottle),
       brake: Math.max(brakeKey, this.touchBrake),
       steer: clamp(steerKey + this.touchSteer, -1, 1),
+      handbrake: Math.max(handbrakeKey, this.touchHandbrake),
     };
   }
 
@@ -84,6 +87,7 @@ export class Input {
     };
     bindHoldButton('btn-accel', (v) => { this.touchThrottle = v; });
     bindHoldButton('btn-reverse', (v) => { this.touchBrake = v; });
+    bindHoldButton('btn-handbrake', (v) => { this.touchHandbrake = v; });
     bindHoldButton('btn-steer-left', (v) => { steerLeft = v; applySteer(); });
     bindHoldButton('btn-steer-right', (v) => { steerRight = v; applySteer(); });
   }

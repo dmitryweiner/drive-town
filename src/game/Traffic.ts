@@ -29,10 +29,18 @@ const NPC_COLORS = ['#c0392b', '#2980b9', '#27ae60', '#8e44ad', '#d35400', '#16a
 
 /** Скорость в дуге поворота. */
 const TURN_SPEED = 4;
+/** Разгон NPC, м/с² (торможение мгновенное — как в driving-trainer).
+ * Без лимита NPC набирал 0→9 м/с за тик и «влетал» под чужие
+ * tta-оценки помехи. */
+const NPC_ACCEL = 3;
 /** Помеха считается, если приедет к перекрёстку раньше этого времени, с. */
 const CONFLICT_TTA = 4;
 /** И ближе этого расстояния, м. */
 const CONFLICT_DIST = 30;
+/** Левый поворот/разворот — манёвр медленный (~4–5 с), встречным нужен
+ * зазор больше: быстрый мотоцикл из-за 30 м успевает прилететь. */
+const ONCOMING_TTA = 6;
+const ONCOMING_DIST = 55;
 /** Дальность слежения за впереди идущим. */
 const GAP_AHEAD = 22;
 const WALK_SPEED = 1.2;
@@ -94,9 +102,10 @@ export function clearToEnter(
     const travel = DIR_VEC[opposite(side)];
     yieldSides = [dirOfVec(rightOf(travel))];
   }
-  if (turn === 'left' || turn === 'uturn') {
-    const onc = opposite(side);
-    if (!yieldSides.includes(onc)) yieldSides = [...yieldSides, onc];
+  const leftish = turn === 'left' || turn === 'uturn';
+  const oncomingSide = leftish ? opposite(side) : null;
+  if (oncomingSide !== null && !yieldSides.includes(oncomingSide)) {
+    yieldSides = [...yieldSides, oncomingSide];
   }
   const box = map.nodeBox(node);
   for (const o of others) {
@@ -108,7 +117,9 @@ export function clearToEnter(
     const ap = approachOf(map, o);
     if (!ap || ap.node !== node || !yieldSides.includes(ap.side)) continue;
     const tta = ap.d / Math.max(Math.abs(o.speed), 0.5);
-    if (ap.d > -2 && ap.d < CONFLICT_DIST && tta < CONFLICT_TTA) return false;
+    const [maxDist, maxTta] =
+      ap.side === oncomingSide ? [ONCOMING_DIST, ONCOMING_TTA] : [CONFLICT_DIST, CONFLICT_TTA];
+    if (ap.d > -2 && ap.d < maxDist && tta < maxTta) return false;
   }
   return true;
 }
@@ -163,6 +174,8 @@ class NpcVehicle {
   private turnS = 0;
   private stopDone = false;
   private reservedNode: number | null = null;
+  /** Сколько секунд стоим с бронью, не двигаясь (страховка от гридлока). */
+  private reservedIdle = 0;
 
   constructor(id: number, spec: VehicleSpec, private readonly map: CityMap) {
     this.id = id;
@@ -191,12 +204,28 @@ class NpcVehicle {
   }
 
   step(dt: number, time: number, others: ActorView[], peds: PedView[], arbiter: NodeArbiter, rng: Rng): void {
-    // отпустить бронь, когда квадрат остался позади
-    if (this.reservedNode !== null && this.mode === 'edge') {
-      const n = this.map.nodes[this.reservedNode];
-      if (Math.hypot(this.pos.x - n.x, this.pos.y - n.y) > HALF_ROAD + 5) {
+    // бронь нужна только чтобы пересечь квадрат: отпускаем сразу после
+    // проезда узла (на коротких кварталах застрявший за перекрёстком
+    // холдер иначе запирает весь узел и город встаёт кольцом)
+    if (this.reservedNode !== null) {
+      const e = this.map.edges[this.edge];
+      const target =
+        this.mode === 'edge' ? (this.dirSign > 0 ? e.b : e.a) : this.plan?.node ?? -1;
+      const inBox = this.inBoxOf(this.reservedNode);
+      if (this.mode === 'edge' && target !== this.reservedNode && !inBox) {
         arbiter.release(this.reservedNode, this.id);
         this.reservedNode = null;
+        this.reservedIdle = 0;
+      } else if (!inBox && Math.abs(this.speed) < 0.2) {
+        // страховка: держим бронь стоя — через 8 с уступаем её другим
+        this.reservedIdle += dt;
+        if (this.reservedIdle > 8) {
+          arbiter.release(this.reservedNode, this.id);
+          this.reservedNode = null;
+          this.reservedIdle = 0;
+        }
+      } else {
+        this.reservedIdle = 0;
       }
     }
 
@@ -214,8 +243,8 @@ class NpcVehicle {
       return;
     }
     const vmax = plan.turn !== 'straight' ? TURN_SPEED : this.freeSpeed();
-    const target = Math.min(vmax, this.followSpeed(others, vmax));
-    this.speed = target;
+    const target = Math.min(vmax, this.followSpeed(others, vmax, plan));
+    this.speed = Math.min(target, this.speed + NPC_ACCEL * dt);
     this.turnS += this.speed * dt;
     if (this.turnS >= plan.total) {
       // выезд на новое ребро
@@ -284,7 +313,7 @@ class NpcVehicle {
     for (const d of candidates) {
       target = Math.min(target, stopProfile(d, vmax));
     }
-    this.speed = target;
+    this.speed = Math.min(target, this.speed + NPC_ACCEL * dt);
     this.along += this.speed * dt * this.dirSign;
 
     // переход в дугу поворота
@@ -305,6 +334,11 @@ class NpcVehicle {
     return Math.min(KIND_SPEED[this.kind], limit);
   }
 
+  private inBoxOf(nodeId: number): boolean {
+    const b = this.map.nodeBox(nodeId);
+    return this.pos.x >= b.xMin && this.pos.x <= b.xMax && this.pos.y >= b.yMin && this.pos.y <= b.yMax;
+  }
+
   /** Есть ли кто-то попутный между мной и стоп-линией. */
   private blockedAhead(others: ActorView[], dStopLine: number): boolean {
     const travel = { x: Math.cos(this.heading), y: Math.sin(this.heading) };
@@ -320,8 +354,11 @@ class NpcVehicle {
     return false;
   }
 
-  /** Скорость, не таранящая впереди идущего (включая игрока). */
-  private followSpeed(others: ActorView[], vmax: number): number {
+  /** Скорость, не таранящая впереди идущего (включая игрока).
+   * В дуге поворота (plan задан) стоящий В СТОРОНЕ от траектории — не
+   * помеха: он ждёт нас у своей стоп-линии, а нос в дуге временно
+   * смотрит на него (иначе взаимное «после вас» и гридлок). */
+  private followSpeed(others: ActorView[], vmax: number, plan: TurnPlan | null = null): number {
     const travel = { x: Math.cos(this.heading), y: Math.sin(this.heading) };
     const right = rightOf(travel);
     let v = vmax;
@@ -332,10 +369,27 @@ class NpcVehicle {
       const fd = rx * travel.x + ry * travel.y;
       const lat = Math.abs(rx * right.x + ry * right.y);
       if (fd <= 0 || fd > GAP_AHEAD || lat > 2.3) continue;
+      if (plan && Math.abs(o.speed) < 0.5 && this.distToTurnAhead(plan, o) > 2.6) continue;
       const d = fd - this.size.length / 2 - o.length / 2 - 1.5;
       v = Math.min(v, stopProfile(d, vmax));
     }
     return v;
+  }
+
+  /** Расстояние от актора до остатка дуги поворота. */
+  private distToTurnAhead(plan: TurnPlan, o: ActorView): number {
+    let best = Infinity;
+    for (let i = 1; i < plan.pts.length; i++) {
+      if (plan.cum[i] < this.turnS - 1) continue;
+      const a = plan.pts[i - 1];
+      const b = plan.pts[i];
+      const abx = b.x - a.x;
+      const aby = b.y - a.y;
+      const ab2 = abx * abx + aby * aby;
+      const t = ab2 > 0 ? Math.max(0, Math.min(1, ((o.x - a.x) * abx + (o.y - a.y) * aby) / ab2)) : 0;
+      best = Math.min(best, Math.hypot(o.x - (a.x + abx * t), o.y - (a.y + aby * t)));
+    }
+    return best;
   }
 
   /** Остановка перед зеброй, если на ней пешеход. */
@@ -482,8 +536,23 @@ class NpcPed {
     return Math.abs(c) <= HALF_ROAD;
   }
 
+  /** Идёт (не пауза/задержка) и ещё не дошёл до полотна. */
+  get approaching(): boolean {
+    if (this.delay > 0 || this.waitLeft > 0 || this.t >= 1) return false;
+    if (this.onRoad) return false;
+    // до дороги, а не после: доля пути до кромки полотна
+    const total = Math.hypot(this.to.x - this.from.x, this.to.y - this.from.y);
+    return this.t < 1.2 / total + 1e-9;
+  }
+
   view(): PedView {
-    return { x: this.pos.x, y: this.pos.y, onRoad: this.onRoad, crosswalk: this.crosswalk };
+    return {
+      x: this.pos.x,
+      y: this.pos.y,
+      onRoad: this.onRoad,
+      approaching: this.approaching,
+      crosswalk: this.crosswalk,
+    };
   }
 
   update(dt: number): void {

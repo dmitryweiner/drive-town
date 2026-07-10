@@ -7,16 +7,16 @@ import type { CitySpec, EdgeSpec, NodeSpec, Rect } from './types';
 /** Зачёт цели: центр машины ближе этого радиуса. */
 export const GOAL_RADIUS = 7;
 /** Минимальная удалённость цели от спавна, рёбер графа. */
-export const MIN_GOAL_HOPS = 4;
+export const MIN_GOAL_HOPS = 5;
 
 /** Размер решётки города (сложность уровней одинаковая). */
-const COLS = 5;
-const ROWS = 4;
+const COLS = 7;
+const ROWS = 5;
 /** Разброс длины квартала, м. */
-const BLOCK_MIN = 80;
-const BLOCK_MAX = 140;
+const BLOCK_MIN = 55;
+const BLOCK_MAX = 95;
 /** Доля «лишних» рёбер сверх остова (меньше — больше тупиков и Т-образных). */
-const EXTRA_EDGE_P = 0.55;
+const EXTRA_EDGE_P = 0.62;
 /** Доля односторонних улиц. */
 const ONE_WAY_P = 0.15;
 /** Отступ домов от осевых линий улиц. */
@@ -117,14 +117,15 @@ export function generateLevel(seed: number): Level {
     n.control = 'none';
   });
 
-  // зебры в глубине длинных рёбер + зоны 30 км/ч
+  // зебры в глубине длинных рёбер + зоны ограничения скорости:
+  // у переходов — 30, в прочих местах для разнообразия — 40
   for (const e of edges) {
     const len = Math.hypot(nodes[e.b].x - nodes[e.a].x, nodes[e.b].y - nodes[e.a].y);
-    if (len >= 60 && rng() < 0.35) {
+    if (len >= 55 && rng() < 0.35) {
       e.crosswalks = [randInt(rng, 20, Math.floor(len - 20))];
       if (rng() < 0.6) e.speedLimit = 30;
-    } else if (rng() < 0.08) {
-      e.speedLimit = 30;
+    } else if (rng() < 0.1) {
+      e.speedLimit = 40;
     }
   }
 
@@ -203,27 +204,34 @@ function bfsCount(adj: number[][], start: number): number {
   return seen.size;
 }
 
-/** 1–2 дома в квартале со случайным отступом от границ. */
+/** Дома в квартале: сетка с зазорами-проулками; часть ячеек — дворы.
+ * Каждый дом со случайным отступом, чтобы силуэты были неровными. */
 function blockBuildings(rng: Rng, area: Rect): Rect[] {
   const w = area.xMax - area.xMin;
   const h = area.yMax - area.yMin;
-  if (w < 14 || h < 14) return [];
-  const inset = (): Rect => ({
-    xMin: area.xMin + rng() * (w * 0.15),
-    xMax: area.xMax - rng() * (w * 0.15),
-    yMin: area.yMin + rng() * (h * 0.15),
-    yMax: area.yMax - rng() * (h * 0.15),
-  });
-  const base = inset();
-  if (w > 60 && rng() < 0.5) {
-    // два дома с проулком
-    const cut = base.xMin + (0.35 + rng() * 0.3) * (base.xMax - base.xMin);
-    return [
-      { ...base, xMax: cut - 3 },
-      { ...base, xMin: cut + 3 },
-    ];
+  if (w < 10 || h < 10) return [];
+  const cols = Math.max(1, Math.min(3, Math.floor(w / 16)));
+  const rows = Math.max(1, Math.min(3, Math.floor(h / 16)));
+  const gap = 3;
+  const cw = (w - gap * (cols - 1)) / cols;
+  const ch = (h - gap * (rows - 1)) / rows;
+  const out: Rect[] = [];
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const skip = rng() < 0.18 && cols * rows > 1; // двор
+      const inset = (size: number): number => rng() * size * 0.22;
+      if (skip) continue;
+      const x0 = area.xMin + c * (cw + gap);
+      const y0 = area.yMin + r * (ch + gap);
+      out.push({
+        xMin: x0 + inset(cw),
+        xMax: x0 + cw - inset(cw),
+        yMin: y0 + inset(ch),
+        yMax: y0 + ch - inset(ch),
+      });
+    }
   }
-  return [base];
+  return out;
 }
 
 class UnionFind {

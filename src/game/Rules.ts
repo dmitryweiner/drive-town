@@ -20,6 +20,8 @@ export interface PedView {
   y: number;
   /** Пешеход на проезжей части (не на тротуаре). */
   onRoad: boolean;
+  /** Пешеход идёт и вот-вот ступит на проезжую часть. */
+  approaching?: boolean;
   /** Индекс зебры в map.crosswalks(). */
   crosswalk: number;
 }
@@ -35,6 +37,8 @@ const STOP_ZONE = 10;
 const FULL_STOP_V = 0.15;
 /** NPC «приближается» к перекрёстку, если ближе этого к своей стоп-линии. */
 const CONFLICT_DIST = 15;
+/** ...и приедет к нему быстрее этого времени, с. */
+const CONFLICT_TTA = 3.5;
 /** Встречный при левом повороте учитывается ближе этого. */
 const ONCOMING_DIST = 12;
 
@@ -281,7 +285,10 @@ export class RuleMonitor {
       if (this.vehicleInBox(v, nodeId)) return 'priority';
       const ap = this.vehicleApproach(v);
       if (!ap || ap.node !== nodeId) continue;
-      if (ap.d > -2 && ap.d < CONFLICT_DIST && conflictSides.includes(ap.side)) {
+      // помеха и по расстоянию, и по времени прибытия: только что
+      // тронувшийся вдалеке NPC — ещё не помеха
+      const tta = ap.d / Math.max(Math.abs(v.speed), 0.5);
+      if (ap.d > -2 && ap.d < CONFLICT_DIST && tta < CONFLICT_TTA && conflictSides.includes(ap.side)) {
         return 'priority';
       }
     }

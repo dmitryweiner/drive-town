@@ -1,5 +1,5 @@
 import type { CarInput, Vec2 } from '../../src/game/Car';
-import { CityMap, HALF_ROAD } from '../../src/game/CityMap';
+import { CityMap } from '../../src/game/CityMap';
 import type { Level } from '../../src/game/generate';
 import { approachOf, type ActorView } from '../../src/game/Rules';
 import type { Round } from '../../src/game/Round';
@@ -176,13 +176,16 @@ export class Autopilot {
     }
 
     const vehicles = this.round.traffic.vehicleViews();
-    // дистанция до попутных
+    // дистанция до попутных; стоящий НЕ на нашей траектории — не помеха
+    // (он ждёт нас у своей стоп-линии; в дуге нос временно смотрит на него,
+    // и без этой проверки возникает взаимное «после вас»)
     for (const n of vehicles) {
       const dx = n.x - pos.x;
       const dy = n.y - pos.y;
       const fwd = dx * Math.cos(heading) + dy * Math.sin(heading);
       const lat = -dx * Math.sin(heading) + dy * Math.cos(heading);
       if (fwd > 0 && fwd < 12 && Math.abs(lat) < 2.2) {
+        if (Math.abs(n.speed) < 0.5 && this.distToPathAhead({ x: n.x, y: n.y }) > 2.6) continue;
         speed = Math.min(speed, fwd < 6 ? 0 : Math.abs(n.speed) * 0.9);
       }
     }
@@ -193,15 +196,18 @@ export class Autopilot {
       id: -1, x: pos.x, y: pos.y, heading, speed: v, length: car.length, width: car.width,
     };
     const ap = approachOf(this.map, view) ?? this.staticApproach(pos, heading);
-    if (ap && ap.d > -0.5 && ap.d < 18) {
+    // «поехал» = центр уже в квадрате узла; до этого момента держим все
+    // холды (порог по d «просачивается» ползком и машина въезжает под помеху)
+    const committed = ap !== null && this.inNodeBox(ap.node, pos);
+    if (ap && !committed && ap.d > -2.5 && ap.d < 18) {
       const node = this.map.nodes[ap.node];
       const light = this.map.lightState(ap.node, ap.side, this.round.time);
       if (light === 'red' || light === 'red-yellow') {
         holds.push(ap.d);
       } else if (light === 'yellow') {
-        // стоим, если остановиться ещё безопасно; иначе завершаем проезд
-        if (ap.d > (v * v) / 8 + 2) holds.push(ap.d);
-      } else if (light === 'green' && ap.d > 4) {
+        // стоим, если остановиться можно (порог чуть строже правила)
+        if (ap.d > (v * v) / 8 + 0.8) holds.push(ap.d);
+      } else if (light === 'green' && ap.d > 1) {
         // к прибытию зелёный кончится — заранее плавно останавливаемся
         const eta = this.round.time + ap.d / Math.max(v, 2);
         if (this.map.lightState(ap.node, ap.side, eta) !== 'green') holds.push(ap.d);
@@ -232,8 +238,9 @@ export class Autopilot {
       const fwd = dx * Math.cos(heading) + dy * Math.sin(heading);
       const lat = -dx * Math.sin(heading) + dy * Math.cos(heading);
       if (fwd < -1 || fwd > 25 || Math.abs(lat) > 3) return;
-      const pedNear = peds.some((p) => p.crosswalk === i && (p.onRoad || nearRoad(p, cw.rect)));
-      if (pedNear) holds.push(fwd - CROSSWALK_LEN / 2 - 0.5);
+      // на дороге или идёт к ней — пропускаем
+      const pedOn = peds.some((p) => p.crosswalk === i && (p.onRoad || p.approaching === true));
+      if (pedOn) holds.push(fwd - CROSSWALK_LEN / 2 - 0.5);
     });
 
     for (const h of holds) {
@@ -254,6 +261,28 @@ export class Autopilot {
     return { throttle: 0, brake: 0, steer };
   }
 
+  /** Минимальное расстояние от точки до ближайших 16 м нашего пути. */
+  private distToPathAhead(p: Vec2): number {
+    let best = Infinity;
+    for (let i = 1; i < this.path.length; i++) {
+      if (this.cum[i] < this.s - 1) continue;
+      if (this.cum[i - 1] > this.s + 16) break;
+      const a = this.path[i - 1];
+      const b = this.path[i];
+      const abx = b.x - a.x;
+      const aby = b.y - a.y;
+      const ab2 = abx * abx + aby * aby;
+      const t = ab2 > 0 ? clamp(((p.x - a.x) * abx + (p.y - a.y) * aby) / ab2, 0, 1) : 0;
+      best = Math.min(best, Math.hypot(p.x - (a.x + abx * t), p.y - (a.y + aby * t)));
+    }
+    return best;
+  }
+
+  private inNodeBox(nodeId: number, p: Vec2): boolean {
+    const n = this.map.nodes[nodeId];
+    return Math.abs(p.x - n.x) <= 4.5 && Math.abs(p.y - n.y) <= 4.5;
+  }
+
   /** approachOf по курсу, когда стоим (approachOf требует движения). */
   private staticApproach(pos: Vec2, heading: number) {
     const view: ActorView = {
@@ -261,16 +290,6 @@ export class Autopilot {
     };
     return approachOf(this.map, view);
   }
-}
-
-/** Пешеход у кромки (в шаге от полотна) — тоже причина пропустить. */
-function nearRoad(p: { x: number; y: number }, rect: { xMin: number; xMax: number; yMin: number; yMax: number }): boolean {
-  const cx = (rect.xMin + rect.xMax) / 2;
-  const cy = (rect.yMin + rect.yMax) / 2;
-  // у зебры поперёк горизонтальной дороги полоса узкая по x и широкая по y
-  const horizontalRoad = rect.xMax - rect.xMin < rect.yMax - rect.yMin;
-  const across = horizontalRoad ? Math.abs(p.y - cy) : Math.abs(p.x - cx);
-  return across <= HALF_ROAD + 0.8;
 }
 
 function mid(alongFrom: number, alongTo: number, dirSign: number): number {

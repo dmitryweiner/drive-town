@@ -15,7 +15,7 @@
       <div class="hud-pill" id="speed" title="Скорость">🚗 <span data-value="speed">0</span> км/ч</div>
       <div class="hud-pill" id="violations" title="Нарушения на уровне">❗ <span data-value="violations">0</span></div>
       <div class="hud-pill" id="dist" title="До цели по прямой">🚩 <span data-value="dist">0</span> м</div>
-      <div class="hud-pill" id="score" title="Всего очков">🏆 <span data-value="score">0</span></div>
+      <div class="hud-pill" id="score" title="Всего очков">🏆 <span data-value="score">0</span><button id="btn-reset" type="button" title="Сбросить прогресс">🗑</button></div>
       <button class="hud-pill" id="btn-retry" type="button" title="Начать уровень заново (R)">↻</button>
     </div>
     <div id="toast" hidden></div>
@@ -35,6 +35,7 @@
     <div id="mobile-controls">
       <div id="ctl-left">
         <button id="btn-accel" aria-label="Газ">▲</button>
+        <button id="btn-handbrake" aria-label="Ручной тормоз">🅿</button>
         <button id="btn-reverse" aria-label="Тормоз / задний ход">▼</button>
       </div>
       <div id="ctl-right">
