@@ -19,17 +19,20 @@ export function engineFreq(speed: number): number {
 }
 
 /** Громкость мотора: слышен на холостых, чуть растёт со скоростью.
- * Тихий фон — не должен заглушать светофор/клаксоны/удары. */
+ * Совсем тихий фон — не должен заглушать светофор/клаксоны/удары. */
 export function engineGain(speed: number): number {
-  return 0.025 + 0.007 * Math.min(Math.abs(speed), 14);
+  return 0.012 + 0.0035 * Math.min(Math.abs(speed), 14);
 }
 
-/** Шорох шин при заносе ручника: от боковой скорости кузова (lateralV).
- * Порог отсекает лёгкий дрейф в обычном повороте. */
-export function skidGain(lateralV: number): number {
-  const a = Math.min(Math.abs(lateralV), 7);
-  if (a < 1) return 0;
-  return 0.3 * ((a - 1) / 6);
+/** Шорох шин: скольжение ВООБЩЕ — занос (боковая скорость кузова) или юз
+ * заблокированных ручником колёс на ходу. Максимум источников, не сумма.
+ * Пороги отсекают лёгкий дрейф в повороте и «ручник в покое». */
+export function skidGain(lateralV: number, handbrake = 0, speed = 0): number {
+  const lat = Math.min(Math.abs(lateralV), 7);
+  const latK = lat < 1 ? 0 : (lat - 1) / 6;
+  const v = Math.min(Math.abs(speed), 9);
+  const longK = handbrake > 0 && v > 1 ? (v - 1) / 8 : 0;
+  return 0.3 * Math.max(latK, longK);
 }
 
 /** Затухание по расстоянию от машины игрока: clamp01(1 - d/R)². */
@@ -166,8 +169,10 @@ export class Sound {
     for (const osc of this.engineOscs) osc.frequency.setTargetAtTime(engineFreq(v), now, 0.05);
     this.engineGainNode?.gain.setTargetAtTime(round.finished ? 0 : engineGain(v), now, 0.08);
 
-    // занос ручника: громкость от боковой скорости кузова
-    const skid = round.finished ? 0 : skidGain(round.car.lateralV);
+    // скольжение: занос (lateralV) или юз колёс под ручником на ходу
+    const skid = round.finished
+      ? 0
+      : skidGain(round.car.lateralV, round.car.handbrakeInput, round.car.velocity);
     this.skidGainNode?.gain.setTargetAtTime(skid, now, 0.04);
 
     // тики ближайшего светофора — фаза подъезда игрока; в квадрате или

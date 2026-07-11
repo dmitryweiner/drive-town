@@ -14,8 +14,8 @@ describe('Sound: чистые маппинги', () => {
     expect(engineGain(0)).toBeGreaterThan(0);
     expect(engineGain(9)).toBeGreaterThan(engineGain(0));
     expect(engineGain(100)).toBe(engineGain(14));
-    // мотор — фон, не должен заглушать остальное
-    expect(engineGain(14)).toBeLessThanOrEqual(0.13);
+    // мотор — совсем тихий фон, не должен заглушать остальное
+    expect(engineGain(14)).toBeLessThanOrEqual(0.065);
   });
 
   it('шорох шин: тишина при слабом заносе, растёт с боковой скоростью, с потолком', () => {
@@ -26,6 +26,17 @@ describe('Sound: чистые маппинги', () => {
     expect(skidGain(-3)).toBe(skidGain(3)); // знак заноса не важен
     expect(skidGain(5)).toBeGreaterThan(skidGain(3));
     expect(skidGain(50)).toBe(skidGain(7));
+  });
+
+  it('шорох шин: юз под ручником на ходу шуршит и без заноса', () => {
+    expect(skidGain(0, 1, 8)).toBeGreaterThan(0);   // прямолинейный юз
+    expect(skidGain(0, 1, 8)).toBeGreaterThan(skidGain(0, 1, 3)); // громче на скорости
+    expect(skidGain(0, 1, 0.5)).toBe(0);            // почти стоим — не шуршит
+    expect(skidGain(0, 0, 8)).toBe(0);              // без ручника качение не шуршит
+    expect(skidGain(0, 1, -8)).toBe(skidGain(0, 1, 8)); // задний ход так же
+    expect(skidGain(0, 1, 100)).toBe(skidGain(0, 1, 9)); // потолок
+    // берётся максимум источников, а не сумма
+    expect(skidGain(7, 1, 9)).toBe(skidGain(7));
   });
 
   it('затухание по расстоянию: clamp01(1-d/R)²', () => {
