@@ -44,6 +44,12 @@ const ONCOMING_DIST = 55;
 /** Дальность слежения за впереди идущим. */
 const GAP_AHEAD = 22;
 const WALK_SPEED = 1.2;
+/** Клаксон «блокировки»: игрок торчит в конусе стоящего NPC дольше этого, с. */
+const HONK_BLOCKED_AFTER = 3;
+/** База интервала повтора гудка; джиттер — из id, НЕ из rng (детерминизм). */
+const HONK_REPEAT_BASE = 4;
+/** «Подрезание»: требуемое замедление резче этого — гудок, м/с². */
+const HONK_CUTOFF_DECEL = 4;
 
 export interface VehicleSpec {
   kind: VehicleKind;
@@ -65,6 +71,16 @@ export interface PedSpec {
 interface TrafficOpts {
   vehicles: VehicleSpec[];
   peds?: PedSpec[];
+}
+
+/** Гудок раздражённого NPC — событие для звука (см. SOUND.md). */
+export interface HonkEvent {
+  x: number;
+  y: number;
+  /** blocked — стоит за игроком; cutoff — игрок подрезал. */
+  kind: 'blocked' | 'cutoff';
+  /** Номер гудка в серии «блокировки» (раздражение растёт), у cutoff всегда 1. */
+  n: number;
 }
 
 export type TurnKind = 'left' | 'right' | 'straight' | 'uturn';
@@ -176,6 +192,11 @@ class NpcVehicle {
   private reservedNode: number | null = null;
   /** Сколько секунд стоим с бронью, не двигаясь (страховка от гридлока). */
   private reservedIdle = 0;
+  // клаксон: детекция всегда активна и без побочек для движения (SOUND.md)
+  private blockedFor = 0;
+  private honkRepeatIn = 0;
+  private honkCount = 0;
+  private playerWasInCone = false;
 
   constructor(id: number, spec: VehicleSpec, private readonly map: CityMap) {
     this.id = id;
@@ -234,6 +255,63 @@ class NpcVehicle {
       return;
     }
     this.stepEdge(dt, time, others, peds, arbiter, rng);
+  }
+
+  /** Триггеры клаксона; зовётся ДО step (для «подрезания» нужна скорость
+   * до мгновенного торможения этого же тика). Движение не меняет. */
+  detectHonk(dt: number, time: number, player: ActorView | null): HonkEvent | null {
+    if (!player) {
+      this.blockedFor = 0;
+      this.honkCount = 0;
+      this.playerWasInCone = false;
+      return null;
+    }
+    const travel = { x: Math.cos(this.heading), y: Math.sin(this.heading) };
+    const right = rightOf(travel);
+    const rx = player.x - this.pos.x;
+    const ry = player.y - this.pos.y;
+    const fd = rx * travel.x + ry * travel.y;
+    const lat = Math.abs(rx * right.x + ry * right.y);
+    const inCone = fd > 0.5 && fd < GAP_AHEAD && lat < 2.3;
+
+    // «подрезание»: игрок ПОЯВИЛСЯ в конусе (фронт, латч на эпизод) и
+    // требуемое замедление резкое
+    let honk: HonkEvent | null = null;
+    if (inCone && !this.playerWasInCone && this.speed > 1) {
+      const gap = fd - this.size.length / 2 - player.length / 2;
+      if (gap > 0 && (this.speed * this.speed) / (2 * gap) > HONK_CUTOFF_DECEL) {
+        honk = { x: this.pos.x, y: this.pos.y, kind: 'cutoff', n: 1 };
+      }
+    }
+    this.playerWasInCone = inCone;
+
+    // «блокировка»: стоим за игроком; на запрещающий свет очередь не гудит —
+    // ждать пришлось бы и без игрока
+    const blocked = inCone && Math.abs(this.speed) < 0.3 && !this.waitingAtLight(time);
+    if (!blocked) {
+      this.blockedFor = 0;
+      this.honkCount = 0;
+      this.honkRepeatIn = 0;
+      return honk;
+    }
+    this.blockedFor += dt;
+    this.honkRepeatIn -= dt;
+    if (this.blockedFor >= HONK_BLOCKED_AFTER && this.honkRepeatIn <= 0) {
+      this.honkCount += 1;
+      this.honkRepeatIn = HONK_REPEAT_BASE + (this.id % 3);
+      honk = { x: this.pos.x, y: this.pos.y, kind: 'blocked', n: this.honkCount };
+    }
+    return honk;
+  }
+
+  /** Свет по курсу NPC не зелёный — стоять пришлось бы и без игрока. */
+  private waitingAtLight(time: number): boolean {
+    if (this.mode !== 'edge') return false;
+    const e = this.map.edges[this.edge];
+    const node = this.dirSign > 0 ? e.b : e.a;
+    const side = this.map.approachSide(node, this.edge);
+    const light = this.map.lightState(node, side, time);
+    return light !== null && light !== 'green';
   }
 
   private stepTurn(dt: number, others: ActorView[]): void {
@@ -585,6 +663,7 @@ export class Traffic {
   private readonly vehicles: NpcVehicle[];
   private readonly peds: NpcPed[];
   private readonly arbiter = new NodeArbiter();
+  private pendingHonks: HonkEvent[] = [];
 
   constructor(map: CityMap, private readonly rng: Rng, opts: TrafficOpts) {
     this.vehicles = opts.vehicles.map((s, i) => new NpcVehicle(i, s, map));
@@ -625,8 +704,17 @@ export class Traffic {
     const views = this.vehicles.map((v) => v.view());
     if (player) views.push(player);
     for (const v of this.vehicles) {
+      const honk = v.detectHonk(dt, time, player);
+      if (honk) this.pendingHonks.push(honk);
       v.step(dt, time, views, pedViews, this.arbiter, this.rng);
     }
+  }
+
+  /** Гудки, накопленные с прошлого съёма (детекция работает всегда). */
+  consumeHonks(): HonkEvent[] {
+    const out = this.pendingHonks;
+    this.pendingHonks = [];
+    return out;
   }
 
   vehicleViews(): ActorView[] {

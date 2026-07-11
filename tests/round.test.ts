@@ -108,6 +108,30 @@ describe('Round: игровой цикл', () => {
     expect(r.car.position.x).toBeLessThan(x0 - 1);
   });
 
+  it('contact/impactSpeed: выставлены в шаг удара, сброшены на свободном ходу', () => {
+    const spec: CitySpec = {
+      nodes: [{ x: 0, y: 0 }, { x: 200, y: 0 }],
+      edges: [{ a: 0, b: 1 }],
+      buildings: [{ xMin: 60, xMax: 80, yMin: -5, yMax: 5 }],
+    };
+    const map = new CityMap(spec);
+    const r = new Round(plan(map, { x: 20, y: 2.25, heading: 0 }, { x: 190, y: 2.25 }), { trafficCount: 0 });
+    expect(r.contact).toBe(false);
+    let hit = false;
+    for (let i = 0; i < 600 && !hit; i++) {
+      r.step(DT, { throttle: 1, brake: 0, steer: 0 });
+      if (r.car.position.x < 50) expect(r.contact).toBe(false); // до дома контакта нет
+      if (r.contact) {
+        hit = true;
+        expect(r.impactSpeed).toBeGreaterThan(1); // скорость ДО обнуления
+      }
+    }
+    expect(hit).toBe(true);
+    // задний ход от стены — контакт пропадает
+    for (let i = 0; i < 120; i++) r.step(DT, { throttle: 0, brake: 1, steer: 0 });
+    expect(r.contact).toBe(false);
+  });
+
   it('раунд с трафиком детерминирован по seed', () => {
     const run = (): string => {
       const map = cross();

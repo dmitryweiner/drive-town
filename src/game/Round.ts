@@ -31,6 +31,10 @@ export class Round {
   violations: Violation[] = [];
   finished = false;
   score = 0;
+  /** В этом шаге был откат hitsSolid (для звука удара). */
+  contact = false;
+  /** Скорость в момент удара, ДО обнуления — громкость удара. */
+  impactSpeed = 0;
 
   constructor(plan: Level, opts: { trafficCount?: number } = {}) {
     this.plan = plan;
@@ -56,6 +60,7 @@ export class Round {
 
   /** Шаг симуляции; возвращает нарушения, случившиеся на этом шаге. */
   step(dt: number, input: CarInput): Violation[] {
+    this.contact = false;
     if (this.finished) return [];
     this.time += dt;
     const prev = { x: this.car.position.x, y: this.car.position.y, heading: this.car.heading };
@@ -78,6 +83,8 @@ export class Round {
     // углом повёрнутый кузов в старой точке уже пересекает препятствие,
     // и машина запирается в вечном откате) и сброс скоростей
     if (this.hitsSolid()) {
+      this.contact = true;
+      this.impactSpeed = Math.hypot(this.car.velocity, this.car.lateralV);
       this.car.position.x = prev.x;
       this.car.position.y = prev.y;
       this.car.heading = prev.heading;

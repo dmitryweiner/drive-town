@@ -83,7 +83,7 @@ html, body { margin: 0; padding: 0; height: 100%; width: 100%; overflow: hidden;
 }
 #btn-reset:hover { opacity: 1; }
 
-#btn-retry, #btn-rotate {
+#btn-retry, #btn-rotate, #btn-mute {
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
   font-family: inherit;
@@ -97,8 +97,9 @@ html, body { margin: 0; padding: 0; height: 100%; width: 100%; overflow: hidden;
   border-color: rgba(255, 206, 77, 0.6);
   background: rgba(255, 206, 77, 0.12);
 }
-#btn-retry:hover, #btn-rotate:hover { background: rgba(20,22,28,0.9); }
-#btn-retry:active, #btn-rotate:active { transform: scale(0.97); }
+#btn-mute[aria-pressed="true"] { opacity: 0.55; }
+#btn-retry:hover, #btn-rotate:hover, #btn-mute:hover { background: rgba(20,22,28,0.9); }
+#btn-retry:active, #btn-rotate:active, #btn-mute:active { transform: scale(0.97); }
 
 /* всплывашка о нарушении */
 #toast {

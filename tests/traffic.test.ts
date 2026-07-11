@@ -134,6 +134,93 @@ describe('Traffic: знак «стоп» и приоритет', () => {
   });
 });
 
+describe('Traffic: клаксон (детекция всегда активна, звук — дело UI)', () => {
+  const S = Math.PI / 2; // курс на юг
+  const player = (x: number, y: number, heading: number, speed: number): ActorView =>
+    ({ id: -1, x, y, heading, speed, length: 4, width: 2 });
+
+  it('«блокировка»: NPC стоит за игроком ≥3 с — гудок, повтор через 4 с, серия растёт', () => {
+    const map = cross();
+    const tr = new Traffic(map, mulberry32(1), {
+      vehicles: [{ kind: 'car', edge: 2, dirSign: 1, along: 20 }], // едет на юг
+    });
+    const p = player(-2.25, 50, S, 0); // стоит на его полосе
+    const honks: { t: number; kind: string; n: number }[] = [];
+    for (let t = 0; t < 20; t += DT) {
+      tr.update(DT, t, p);
+      for (const h of tr.consumeHonks()) honks.push({ t, kind: h.kind, n: h.n });
+    }
+    expect(honks.length).toBeGreaterThanOrEqual(2);
+    expect(honks.every((h) => h.kind === 'blocked')).toBe(true);
+    // подъехать + постоять 3 с: раньше ~6 с гудка быть не может
+    expect(honks[0].t).toBeGreaterThan(6);
+    // повтор через 4 + id % 3 = 4 с (± тик симуляции), номер в серии растёт
+    expect(honks[1].t - honks[0].t).toBeCloseTo(4, 0);
+    expect(honks.map((h) => h.n)).toEqual(honks.map((_, i) => i + 1));
+  });
+
+  it('«блокировка» не гудит, пока свет NPC красный (очередь на светофоре)', () => {
+    const map = cross({ control: 'lights' });
+    // западный подъезд: горизонтали зелёный только при t в [10,18)
+    const tr = new Traffic(map, mulberry32(2), {
+      vehicles: [{ kind: 'car', edge: 3, dirSign: 1, along: 75 }],
+    });
+    const p = player(-10, 2.25, 0, 0); // стоит перед стоп-линией
+    const honks: number[] = [];
+    for (let t = 0; t < 17; t += DT) {
+      tr.update(DT, t, p);
+      for (const h of tr.consumeHonks()) {
+        expect(h.kind).toBe('blocked');
+        honks.push(t);
+      }
+    }
+    // на красный молчит, хотя стоит за игроком с ~3 с; гудок — через 3 с зелёного
+    expect(honks.length).toBeGreaterThanOrEqual(1);
+    expect(honks[0]).toBeGreaterThan(12.5);
+    expect(honks[0]).toBeLessThan(14);
+  });
+
+  it('«подрезание»: игрок возник близко перед движущимся NPC — одиночный гудок, латч', () => {
+    const map = cross();
+    const tr = new Traffic(map, mulberry32(1), {
+      vehicles: [{ kind: 'car', edge: 2, dirSign: 1, along: 10 }],
+    });
+    let t = 0;
+    for (; t < 3; t += DT) {
+      tr.update(DT, t, null);
+      tr.consumeHonks();
+    }
+    const v0 = tr.vehicleViews()[0];
+    expect(Math.abs(v0.speed)).toBeGreaterThan(7); // разогнался
+    // игрок вклинивается в 8 м перед носом и едет медленно
+    let py = v0.y + 8;
+    const honks: { t: number; kind: string }[] = [];
+    for (const tCut = t; t < tCut + 5; t += DT) {
+      tr.update(DT, t, player(-2.25, py, S, 3));
+      py += 3 * DT;
+      for (const h of tr.consumeHonks()) honks.push({ t, kind: h.kind });
+    }
+    expect(honks).toHaveLength(1);
+    expect(honks[0].kind).toBe('cutoff');
+    expect(honks[0].t).toBeLessThan(3.3); // сразу, не по таймеру
+  });
+
+  it('обычное сближение с едущим впереди игроком — без гудков', () => {
+    const map = cross();
+    const tr = new Traffic(map, mulberry32(1), {
+      vehicles: [{ kind: 'car', edge: 2, dirSign: 1, along: 10 }],
+    });
+    let py = 40;
+    let honks = 0;
+    for (let t = 0; t < 10; t += DT) {
+      tr.update(DT, t, player(-2.25, py, S, 3));
+      py += 3 * DT;
+      honks += tr.consumeHonks().length;
+    }
+    expect(honks).toBe(0);
+  });
+});
+
 describe('Traffic: дистанция и пешеходы', () => {
   it('машина не таранит медленный велосипед впереди', () => {
     const map = cross();

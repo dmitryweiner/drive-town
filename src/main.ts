@@ -4,8 +4,11 @@ import { Hud } from './ui/Hud';
 import { Input } from './ui/Input';
 import { Minimap } from './ui/Minimap';
 import { Renderer } from './ui/Renderer';
+import { Sound } from './ui/Sound';
 
 const STORAGE_KEY = 'drive-town-v1';
+// отдельный ключ звука — схему SaveState не трогаем
+const SOUND_KEY = 'drive-town-sound';
 
 interface SaveState {
   level: number;
@@ -64,12 +67,47 @@ function newSeed(): number {
   return Math.floor(Math.random() * 2 ** 31);
 }
 
+// звук: AudioContext создаётся лениво по клику «Поехали!» (autoplay-политика)
+const sound = new Sound(readSoundPref());
+
+function readSoundPref(): boolean {
+  try {
+    return localStorage.getItem(SOUND_KEY) === 'off';
+  } catch {
+    return false;
+  }
+}
+
+const muteBtn = document.getElementById('btn-mute');
+function syncMuteBtn(): void {
+  if (!muteBtn) return;
+  muteBtn.textContent = sound.isMuted ? '🔇' : '🔊';
+  muteBtn.setAttribute('aria-pressed', String(sound.isMuted));
+}
+syncMuteBtn();
+muteBtn?.addEventListener('click', () => {
+  const muted = sound.toggleMuted();
+  try {
+    localStorage.setItem(SOUND_KEY, muted ? 'off' : 'on');
+  } catch {
+    // приватный режим и т.п. — просто не сохраняем
+  }
+  syncMuteBtn();
+  muteBtn.blur(); // чтобы пробел (ручник) не «нажимал» кнопку снова
+});
+
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) sound.suspend();
+  else sound.resume();
+});
+
 // стартовый экран: симуляция стоит до клика «Поехали!»; этот клик — жест
-// пользователя, который позже пригодится для инициализации звука
+// пользователя, разрешающий создать AudioContext
 let started = false;
 const startOverlay = document.getElementById('start-overlay');
 document.getElementById('btn-start')?.addEventListener('click', () => {
   started = true;
+  sound.init();
   startOverlay?.setAttribute('hidden', '');
 });
 
@@ -87,6 +125,7 @@ document.getElementById('btn-reset')?.addEventListener('click', () => {
   persist();
   round = new Round(generateLevel(save.seed));
   scoreBanked = false;
+  sound.reset();
 });
 
 function isMobile(): boolean {
@@ -154,16 +193,19 @@ function loop(now: number): void {
     // уровень заново (тот же город)
     round = new Round(generateLevel(save.seed));
     scoreBanked = false;
+    sound.reset();
   }
   if (input.consumeNext() && round.finished) {
     save = { level: save.level + 1, total: save.total + round.score, seed: newSeed() };
     persist();
     round = new Round(generateLevel(save.seed));
     scoreBanked = false;
+    sound.reset();
   }
 
   const fresh = started ? round.step(dt, input.read()) : [];
   for (const v of fresh) hud.toast(v);
+  sound.update(round, dt, fresh);
 
   if (round.finished && !scoreBanked) {
     scoreBanked = true;
