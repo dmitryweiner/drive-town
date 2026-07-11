@@ -35,8 +35,15 @@ const BUILDING_PALETTE: { wall: string; roof: string }[] = [
 
 export class Renderer {
   private zoom = 1;
+  private rotateWithCar = false;
 
   constructor(private readonly canvas: HTMLCanvasElement) {}
+
+  /** Вкл/выкл вращение камеры по курсу машины; возвращает новое состояние. */
+  toggleRotate(): boolean {
+    this.rotateWithCar = !this.rotateWithCar;
+    return this.rotateWithCar;
+  }
 
   resize(): void {
     const vv = window.visualViewport;
@@ -75,6 +82,8 @@ export class Renderer {
     ctx.save();
     ctx.translate(w / 2, h / 2);
     ctx.scale(scale, scale);
+    // камера по курсу: машина всегда «носом вверх»
+    if (this.rotateWithCar) ctx.rotate(-round.car.heading - Math.PI / 2);
     ctx.translate(-round.car.position.x, -round.car.position.y);
 
     this.drawCity(ctx, map, round.time);

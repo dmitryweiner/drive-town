@@ -8,6 +8,8 @@
 //   node scripts/shot.mjs 7 --zoomout 8      # отдалить камеру на N щелчков
 //   node scripts/shot.mjs 7 --mobile         # мобильный вьюпорт с кнопками
 //   node scripts/shot.mjs 7 --wait 3         # подождать перед кадром (default 1.5)
+//   node scripts/shot.mjs 7 --overlay        # оставить стартовый оверлей в кадре
+//   node scripts/shot.mjs 7 --rotate         # включить вращение карты по курсу
 //
 // Кадры пишутся в ./shots/seed-<seed>[-after|-drift].png. Dev-сервер
 // поднимается сам (и гасится), если на :5173 ещё ничего не слушает.
@@ -80,6 +82,11 @@ for (const seed of seeds.length ? seeds : ['random']) {
   const url = seed === 'random' ? BASE : `${BASE}/?seed=${seed}`;
   const name = `seed-${seed}`;
   await page.goto(url);
+  if (!flags.has('overlay')) {
+    // закрыть стартовый экран, иначе все кадры будут с ним
+    await page.locator('#btn-start').click({ timeout: 3000 }).catch(() => {});
+    if (flags.has('rotate')) await page.locator('#btn-rotate').click();
+  }
   await page.waitForTimeout(waitSec * 1000);
   if (zoomOut > 0) {
     await page.mouse.move(640, 400);

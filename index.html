@@ -12,13 +12,31 @@
     <div id="hud">
       <div class="hud-pill" id="level" title="Номер уровня">🏙 <span data-value="level">1</span></div>
       <div class="hud-pill" id="time" title="Время уровня">⏱ <span data-value="time">0:00</span></div>
-      <div class="hud-pill" id="speed" title="Скорость">🚗 <span data-value="speed">0</span> км/ч</div>
       <div class="hud-pill" id="violations" title="Нарушения на уровне">❗ <span data-value="violations">0</span></div>
       <div class="hud-pill" id="dist" title="До цели по прямой">🚩 <span data-value="dist">0</span> м</div>
       <div class="hud-pill" id="score" title="Всего очков">🏆 <span data-value="score">0</span><button id="btn-reset" type="button" title="Сбросить прогресс">🗑</button></div>
+      <button class="hud-pill" id="btn-rotate" type="button" title="Вращение карты по курсу машины" aria-pressed="false">🧭</button>
       <button class="hud-pill" id="btn-retry" type="button" title="Начать уровень заново (R)">↻</button>
+      <div id="speedo" title="Скорость"><span data-value="speed">0</span><span class="unit">км/ч</span></div>
     </div>
     <div id="toast" hidden></div>
+    <div id="start-overlay">
+      <div class="card">
+        <h2>🚗 Drive Town</h2>
+        <p class="stats-row">Доедь до цели 🚩, соблюдая ПДД — нарушения съедают очки.</p>
+        <div class="controls">
+          <p class="stats-row"><b>W / ↑</b> — газ</p>
+          <p class="stats-row"><b>S / ↓</b> — тормоз, задний ход</p>
+          <p class="stats-row"><b>A D / ← →</b> — руль</p>
+          <p class="stats-row"><b>Пробел</b> — ручной тормоз</p>
+          <p class="stats-row"><b>R</b> — уровень заново · <b>N</b> — новый город</p>
+          <p class="stats-row">Масштаб — колесо мыши или щипок; на телефоне — кнопки на экране.</p>
+        </div>
+        <div class="actions">
+          <button id="btn-start" type="button" autofocus>Поехали!</button>
+        </div>
+      </div>
+    </div>
     <div id="result-overlay" hidden>
       <div class="card">
         <h2 class="won">🏁 Уровень пройден!</h2>

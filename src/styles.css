@@ -55,6 +55,21 @@ html, body { margin: 0; padding: 0; height: 100%; width: 100%; overflow: hidden;
 #hud [data-value] { text-align: right; }
 #violations { color: var(--lost); }
 #score { color: #ffd75e; }
+
+/* крупный спидометр под шапкой: скорость важна! */
+#speedo {
+  flex-basis: 100%;
+  font-size: 40px;
+  font-weight: 800;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+#speedo .unit {
+  font-size: 16px;
+  font-weight: 600;
+  opacity: 0.75;
+  margin-left: 6px;
+}
 #btn-reset {
   border: none;
   background: none;
@@ -68,17 +83,22 @@ html, body { margin: 0; padding: 0; height: 100%; width: 100%; overflow: hidden;
 }
 #btn-reset:hover { opacity: 1; }
 
-#btn-retry {
+#btn-retry, #btn-rotate {
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
   font-family: inherit;
   font-weight: 600;
-  margin-left: auto;
   font-size: 20px;
   text-shadow: inherit;
 }
-#btn-retry:hover { background: rgba(20,22,28,0.9); }
-#btn-retry:active { transform: scale(0.97); }
+#btn-rotate { margin-left: auto; }
+#btn-rotate[aria-pressed="true"] {
+  color: #ffce4d;
+  border-color: rgba(255, 206, 77, 0.6);
+  background: rgba(255, 206, 77, 0.12);
+}
+#btn-retry:hover, #btn-rotate:hover { background: rgba(20,22,28,0.9); }
+#btn-retry:active, #btn-rotate:active { transform: scale(0.97); }
 
 /* всплывашка о нарушении */
 #toast {
@@ -135,6 +155,7 @@ body.is-mobile #mobile-controls { display: block; }
 @media (max-width: 500px) {
   .hud-pill { font-size: 14px; padding: 0 10px; }
   #minimap { width: 130px; height: 130px; }
+  #speedo { font-size: 32px; }
 }
 
 /* в мобильном режиме миникарта по центру правого края:
@@ -152,7 +173,7 @@ body.is-mobile #minimap {
   }
 }
 
-#result-overlay {
+#result-overlay, #start-overlay {
   position: absolute;
   inset: 0;
   display: flex;
@@ -161,8 +182,8 @@ body.is-mobile #minimap {
   background: rgba(10, 12, 16, 0.45);
   z-index: 10;
 }
-#result-overlay[hidden] { display: none; }
-#result-overlay .card {
+#result-overlay[hidden], #start-overlay[hidden] { display: none; }
+#result-overlay .card, #start-overlay .card {
   background: rgba(24, 26, 33, 0.96);
   border: 1px solid rgba(255,255,255,0.1);
   border-radius: 16px;
@@ -173,13 +194,13 @@ body.is-mobile #minimap {
   text-align: center;
   box-shadow: 0 12px 40px rgba(0,0,0,0.5);
 }
-#result-overlay h2 { margin: 0 0 12px; font-size: 24px; }
+#result-overlay h2, #start-overlay h2 { margin: 0 0 12px; font-size: 24px; }
 #result-overlay h2.won { color: var(--won); }
-#result-overlay .stats-row { margin: 0 0 6px; font-size: 16px; }
+#result-overlay .stats-row, #start-overlay .stats-row { margin: 0 0 6px; font-size: 16px; }
 #result-overlay .stats-row.score { font-size: 18px; color: #ffd75e; }
 #result-overlay .violation-list { margin: 0 0 10px; font-size: 14px; color: var(--lost); }
-#result-overlay .actions { display: flex; gap: 10px; justify-content: center; margin-top: 12px; }
-#result-overlay button {
+#result-overlay .actions, #start-overlay .actions { display: flex; gap: 10px; justify-content: center; margin-top: 12px; }
+#result-overlay button, #start-overlay button {
   background: rgba(110, 224, 140, 0.16);
   color: var(--won);
   border: 1px solid rgba(110, 224, 140, 0.5);
@@ -190,4 +211,12 @@ body.is-mobile #minimap {
   cursor: pointer;
   font-family: inherit;
 }
-#result-overlay button:hover { background: rgba(110, 224, 140, 0.28); }
+#result-overlay button:hover, #start-overlay button:hover { background: rgba(110, 224, 140, 0.28); }
+
+/* памятка управления на стартовом экране */
+#start-overlay .controls {
+  display: table;
+  margin: 14px auto;
+  text-align: left;
+}
+#start-overlay .controls b { color: #ffce4d; }

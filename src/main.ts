@@ -64,6 +64,22 @@ function newSeed(): number {
   return Math.floor(Math.random() * 2 ** 31);
 }
 
+// стартовый экран: симуляция стоит до клика «Поехали!»; этот клик — жест
+// пользователя, который позже пригодится для инициализации звука
+let started = false;
+const startOverlay = document.getElementById('start-overlay');
+document.getElementById('btn-start')?.addEventListener('click', () => {
+  started = true;
+  startOverlay?.setAttribute('hidden', '');
+});
+
+// вращение карты по курсу машины (по умолчанию выключено)
+const rotateBtn = document.getElementById('btn-rotate');
+rotateBtn?.addEventListener('click', () => {
+  rotateBtn.setAttribute('aria-pressed', String(renderer.toggleRotate()));
+  rotateBtn.blur(); // чтобы пробел (ручник) не «нажимал» кнопку снова
+});
+
 // сброс прогресса: уровень 1, очки 0, новый город
 document.getElementById('btn-reset')?.addEventListener('click', () => {
   if (!window.confirm('Сбросить прогресс (уровень и очки)?')) return;
@@ -146,7 +162,7 @@ function loop(now: number): void {
     scoreBanked = false;
   }
 
-  const fresh = round.step(dt, input.read());
+  const fresh = started ? round.step(dt, input.read()) : [];
   for (const v of fresh) hud.toast(v);
 
   if (round.finished && !scoreBanked) {
