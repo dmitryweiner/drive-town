@@ -28,7 +28,8 @@ export class Hud {
     const kmh = Math.round(Math.abs(round.car.velocity) * 3.6);
     if (kmh !== this.lastSpeed) {
       this.lastSpeed = kmh;
-      setText(this.speedEl, String(kmh));
+      // всегда два знака (maxSpeed 15 м/с = 54 км/ч), чтобы надпись не прыгала
+      setText(this.speedEl, String(kmh).padStart(2, '0'));
     }
     setText(this.violationsEl, String(round.violations.length));
     const dist = Math.round(round.goalDist);

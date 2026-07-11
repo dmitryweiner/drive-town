@@ -59,7 +59,7 @@ html, body { margin: 0; padding: 0; height: 100%; width: 100%; overflow: hidden;
 /* крупный спидометр под шапкой: скорость важна! */
 #speedo {
   flex-basis: 100%;
-  font-size: 40px;
+  font-size: 56px;
   font-weight: 800;
   line-height: 1;
   font-variant-numeric: tabular-nums;
@@ -155,7 +155,7 @@ body.is-mobile #mobile-controls { display: block; }
 @media (max-width: 500px) {
   .hud-pill { font-size: 14px; padding: 0 10px; }
   #minimap { width: 130px; height: 130px; }
-  #speedo { font-size: 32px; }
+  #speedo { font-size: 42px; }
 }
 
 /* в мобильном режиме миникарта по центру правого края:
