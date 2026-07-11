@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { obbIntersect, type OBB } from '../src/game/Collision';
-import { HALF_ROAD, STOP_LINE_OFFSET } from '../src/game/CityMap';
+import { HALF_ROAD, ROUNDABOUT_R, STOP_LINE_OFFSET } from '../src/game/CityMap';
 import { mulberry32 } from '../src/game/rng';
 import { Traffic } from '../src/game/Traffic';
 import type { ActorView } from '../src/game/Rules';
@@ -152,6 +152,27 @@ describe('Traffic: ЖД-переезд', () => {
     expect(minNearLine).toBeLessThan(0.08); // полная остановка в стоп-зоне
     expect(maxAlong).toBeGreaterThan(60);   // и поехал дальше через рельсы
   });
+
+  it('у переезда со светофором NPC стоит при мигании и едет без остановки после', () => {
+    const map = cross({ railLightS: true }); // мигает при t в [0, 10)
+    const tr = new Traffic(map, mulberry32(9), {
+      vehicles: [{ kind: 'car', edge: 2, dirSign: 1, along: 20 }],
+    });
+    let crossedAt = -1;
+    for (let t = 0; t < 25; t += DT) {
+      tr.update(DT, t, null);
+      const v = tr.vehicleViews()[0];
+      const front = v.y + v.length / 2;
+      // пока мигает — бампер не пересекает линию рельсов (y = 48.8)
+      if (map.railFlashing(0, t) && t > 5) {
+        expect(front, `NPC на переезде при мигании (t=${t.toFixed(2)})`).toBeLessThan(49);
+      }
+      if (crossedAt < 0 && v.y > 52) crossedAt = t;
+    }
+    // после конца мигания (10 с) проезжает без полной остановки
+    expect(crossedAt).toBeGreaterThan(10);
+    expect(crossedAt).toBeLessThan(14);
+  });
 });
 
 describe('Traffic: круговое движение', () => {
@@ -167,8 +188,8 @@ describe('Traffic: круговое движение', () => {
       const v = tr.vehicleViews()[0];
       const d = Math.hypot(v.x, v.y);
       expect(map.isOnRoad({ x: v.x, y: v.y }), `NPC вне дороги: ${v.x},${v.y}`).toBe(true);
-      if (d < 6) wasInRing = true;
-      if (wasInRing && d > 12) leftRing = true;
+      if (d < 8) wasInRing = true;
+      if (wasInRing && d > 14) leftRing = true;
     }
     expect(wasInRing).toBe(true);
     expect(leftRing).toBe(true);
@@ -180,11 +201,11 @@ describe('Traffic: круговое движение', () => {
       vehicles: [{ kind: 'car', edge: 0, dirSign: 1, along: 80 }],
     });
     // игрок «кружит» по кольцу: точка на осевой кольца с ненулевой скоростью
-    const player: ActorView = { id: -1, x: 4, y: 0, heading: -Math.PI / 2, speed: 4, length: 4, width: 2 };
+    const player: ActorView = { id: -1, x: 6.75, y: 0, heading: -Math.PI / 2, speed: 4, length: 4, width: 2 };
     for (let t = 0; t < 12; t += DT) tr.update(DT, t, player);
     const v = tr.vehicleViews()[0];
     // NPC добрался к кольцу, но внутрь не сунулся
-    expect(Math.hypot(v.x, v.y)).toBeGreaterThan(6.25);
+    expect(Math.hypot(v.x, v.y)).toBeGreaterThan(ROUNDABOUT_R);
   });
 });
 

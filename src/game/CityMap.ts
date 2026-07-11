@@ -17,10 +17,17 @@ export const DEFAULT_SPEED_LIMIT = 50;
 export const CROSSWALK_LEN = 3;
 /** Полуширина полотна рельсов ЖД-переезда вдоль дороги. */
 export const RAIL_HALF = 1.2;
+/** Цикл ЖД-светофора: RAIL_FLASH секунд мигает красный («поезд»), остальное
+ * время погашен. Сдвиг фазы — детерминированный, по индексу переезда. */
+export const RAIL_CYCLE = 34;
+export const RAIL_FLASH = 10;
 
 /** Круговое движение: островок, осевая кольцевой полосы, внешний край.
- * Осевая R=4 больше минимального радиуса машины (~3.5 м). */
-export const ROUNDABOUT_ISLAND_R = 1.75;
+ * Кольцо крупное: при внешнем R < HALF_ROAD/sin(45°) горловины двух соседних
+ * дорог съедают весь периметр и внешний край между съездами не виден.
+ * НЕ уменьшать: на осевой ~4 м точки касания въезда/выезда правого поворота
+ * меняются местами и «по кольцу» превращается в дугу ~345°. */
+export const ROUNDABOUT_ISLAND_R = 4.5;
 export const ROUNDABOUT_LANE_R = ROUNDABOUT_ISLAND_R + LANE_W / 2;
 export const ROUNDABOUT_R = ROUNDABOUT_ISLAND_R + LANE_W;
 /** Радиус въездной/выездной дуги кольца (S-сопряжение с полосой). */
@@ -58,6 +65,8 @@ export interface RailCrossing {
   rect: Rect;
   /** Ось ДОРОГИ ('x' — дорога горизонтальна, рельсы идут по y). */
   axis: 'x' | 'y';
+  /** Переезд со светофором: стоп-линии нет, стоять только пока мигает. */
+  light: boolean;
 }
 
 export interface Route {
@@ -137,7 +146,11 @@ export class CityMap {
     });
     this.railwayList = [];
     this.edges.forEach((e, id) => {
-      for (const at of e.railways ?? []) {
+      const all = [
+        ...(e.railways ?? []).map((at) => ({ at, light: false })),
+        ...(e.railLights ?? []).map((at) => ({ at, light: true })),
+      ];
+      for (const { at, light } of all) {
         const a = this.nodes[e.a];
         const u = this.edgeUnit(id);
         const cx = a.x + u.x * at;
@@ -146,6 +159,7 @@ export class CityMap {
         this.railwayList.push({
           edge: id,
           at,
+          light,
           axis: horizontal ? 'x' : 'y',
           rect: horizontal
             ? { xMin: cx - RAIL_HALF, xMax: cx + RAIL_HALF, yMin: cy - HALF_ROAD, yMax: cy + HALF_ROAD }
@@ -336,10 +350,7 @@ export class CityMap {
     const rf = rightOf(f);
     const ro = rightOf(o);
     if (this.nodes[nodeId].control === 'roundabout') {
-      // правый поворот срезает по обычной дуге R=4.5 (она остаётся на
-      // полотне кольца); прямо/налево/разворот — по кольцу вокруг островка
-      const rightTurn = inSide !== outSide && f.x * o.y - f.y * o.x > 0;
-      if (!rightTurn) return this.ringPath(nodeId, inSide, outSide);
+      return this.ringPath(nodeId, inSide, outSide);
     }
     const entry: Vec2 = {
       x: n.x - f.x * HALF_ROAD + rf.x * LANE_OFF,
@@ -410,6 +421,20 @@ export class CityMap {
 
   railways(): RailCrossing[] {
     return this.railwayList;
+  }
+
+  /** Мигает ли красный на ЖД-светофоре переезда railIndex в момент t. */
+  railFlashing(railIndex: number, t: number): boolean {
+    return this.railFlashElapsed(railIndex, t) !== null;
+  }
+
+  /** Сколько секунд уже мигает красный (null — погашен). Нужно правилу
+   * прощения «мигание включилось, когда тормозить было поздно». */
+  railFlashElapsed(railIndex: number, t: number): number | null {
+    if (!this.railwayList[railIndex]?.light) return null;
+    const off = (railIndex * 17) % RAIL_CYCLE;
+    const tt = ((t + off) % RAIL_CYCLE + RAIL_CYCLE) % RAIL_CYCLE;
+    return tt < RAIL_FLASH ? tt : null;
   }
 
   /** Разворот в тупике: подъезд по своей полосе, полукруг, выезд по встречной. */

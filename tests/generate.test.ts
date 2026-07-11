@@ -86,6 +86,14 @@ describe('generateLevel: инварианты для пачки seed', () => {
         expect(rw.at).toBeLessThanOrEqual(m.edgeLen(rw.edge) - 20);
         expect(m.edges[rw.edge].crosswalks).toBeUndefined();
       }
+
+      // «разворот запрещён» — только на перекрёстках и не на кольцах
+      m.nodes.forEach((n, id) => {
+        if (n.noUTurn) {
+          expect(m.degree(id)).toBeGreaterThanOrEqual(3);
+          expect(n.control).not.toBe('roundabout');
+        }
+      });
     });
 
     it(`seed=${seed}: дома не пересекают дороги`, () => {
@@ -129,16 +137,22 @@ describe('generateLevel: инварианты для пачки seed', () => {
 });
 
 describe('generateLevel: новые кейсы встречаются', () => {
-  it('на пачке сидов попадаются и кольца, и ЖД-переезды', () => {
+  it('на пачке сидов попадаются кольца, оба вида ЖД-переездов и знак 431', () => {
     let rings = 0;
-    let rails = 0;
+    let railSigns = 0;
+    let railLights = 0;
+    let noUTurns = 0;
     for (let seed = 1; seed <= 40; seed++) {
       const m = generateLevel(seed).map;
       rings += m.nodes.filter((n) => n.control === 'roundabout').length;
-      rails += m.railways().length;
+      railSigns += m.railways().filter((r) => !r.light).length;
+      railLights += m.railways().filter((r) => r.light).length;
+      noUTurns += m.nodes.filter((n) => n.noUTurn).length;
     }
     expect(rings).toBeGreaterThan(10);
-    expect(rails).toBeGreaterThan(10);
+    expect(railSigns).toBeGreaterThan(5);
+    expect(railLights).toBeGreaterThan(5);
+    expect(noUTurns).toBeGreaterThan(10);
   });
 });
 

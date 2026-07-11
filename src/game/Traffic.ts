@@ -395,7 +395,7 @@ class NpcVehicle {
     }
     const cwStop = this.crosswalkStop(peds);
     if (cwStop !== null) candidates.push(cwStop);
-    const railStop = this.railwayStop();
+    const railStop = this.railwayStop(time);
     if (railStop !== null) candidates.push(railStop);
 
     const vmax = this.freeSpeed();
@@ -481,27 +481,39 @@ class NpcVehicle {
     return best;
   }
 
-  /** Остановка перед ЖД-переездом: обязательная полная, затем проезд. */
-  private railwayStop(): number | null {
+  /** Остановка перед ЖД-переездом: со знаком — обязательная полная, затем
+   * проезд; со светофором — стоим только пока мигает красный. */
+  private railwayStop(time: number): number | null {
+    let out: number | null = null;
     let best: { i: number; d: number } | null = null;
     this.map.railways().forEach((rw, i) => {
       if (rw.edge !== this.edge) return;
-      // d — от центра машины до стоп-линии (за 1 м до полотна рельсов)
+      // d — от центра машины до линии (за 1 м до полотна рельсов)
       const d = (rw.at - this.along) * this.dirSign - RAIL_HALF - STOP_LINE_OFFSET;
       if (d < -1) return; // уже на переезде/за ним
+      if (rw.light) {
+        if (!this.map.railFlashing(i, time)) return;
+        // мигание застало носом на рельсах — завершаем проезд (NPC тормозит
+        // мгновенно, поэтому «поздно» — только когда стоять пришлось бы на путях)
+        if (d < 1.5) return;
+        const cand = d - this.size.length / 2;
+        out = out === null ? cand : Math.min(out, cand);
+        return;
+      }
       if (!best || d < best.d) best = { i, d };
     });
     if (!best) {
       this.railDone = null;
-      return null;
+      return out;
     }
     const { i, d } = best;
-    if (this.railDone === i) return null;
+    if (this.railDone === i) return out;
     if (d < 3 && Math.abs(this.speed) < 0.08) {
       this.railDone = i;
-      return null;
+      return out;
     }
-    return d - this.size.length / 2;
+    const cand = d - this.size.length / 2;
+    return out === null ? cand : Math.min(out, cand);
   }
 
   /** Остановка перед зеброй, если на ней пешеход. */

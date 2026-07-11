@@ -323,8 +323,13 @@ export class Renderer {
     ctx.setLineDash([]);
   }
 
-  /** ЖД-переезд: насыпь, шпалы, рельсы поперёк дороги, стоп-линии. */
-  private drawRailway(ctx: CanvasRenderingContext2D, map: CityMap, rw: { edge: number; at: number }): void {
+  /** ЖД-переезд: насыпь, шпалы, рельсы поперёк дороги; у переезда со
+   * знаком — стоп-линии (у светофорного их нет — см. drawFurniture). */
+  private drawRailway(
+    ctx: CanvasRenderingContext2D,
+    map: CityMap,
+    rw: { edge: number; at: number; light: boolean },
+  ): void {
     const e = map.edges[rw.edge];
     const a = map.nodes[e.a];
     const u = map.edgeUnit(rw.edge);
@@ -349,6 +354,7 @@ export class Renderer {
       ctx.stroke();
     }
     ctx.restore();
+    if (rw.light) return; // у светофорного переезда стоп-линии нет
     // стоп-линии перед переездом на каждой въездной полосе
     ctx.strokeStyle = MARK;
     ctx.lineWidth = 0.5;
@@ -419,17 +425,17 @@ export class Renderer {
         if (n.control === 'lights' && canEnter) {
           occupy(pos);
           drawTrafficLight(ctx, pos.x, pos.y, map.lightState(i, side, time) ?? 'red');
-          continue;
-        }
-        if (n.control === 'priority' && canEnter) {
+        } else if (n.control === 'priority' && canEnter) {
           occupy(pos);
           const num = isMinor(n.mainAxis, side) ? (n.minorSign === 'stop' ? '302' : '301') : '309';
           drawSign(ctx, pos.x, pos.y, num, signAngle(DIR_VEC[opposite(side)]));
-          continue;
-        }
-        if (n.control === 'roundabout' && canEnter) {
+        } else if (n.control === 'roundabout' && canEnter) {
           occupy(pos);
           drawSign(ctx, pos.x, pos.y, '303', signAngle(DIR_VEC[opposite(side)]));
+        }
+        if (n.noUTurn === true && canEnter) {
+          const travel = DIR_VEC[opposite(side)];
+          placeSign(signPos(n, side, 1, map.nodeRadius(i)), DIR_VEC[side], '431', travel);
         }
       }
     }
@@ -469,14 +475,20 @@ export class Renderer {
           placeSign(at(along, dirSign), { x: -dir.x, y: -dir.y }, '306', dir);
         }
       }
-      for (const rw of map.railways()) {
-        if (rw.edge !== i) continue;
+      map.railways().forEach((rw, ri) => {
+        if (rw.edge !== i) return;
         for (const dirSign of map.allowedDirSigns(i)) {
-          const along = rw.at - dirSign * (RAIL_HALF + 5);
           const dir = { x: u.x * dirSign, y: u.y * dirSign };
+          if (rw.light) {
+            // ЖД-светофор у линии (стоп-линии нет — стоят по сигналу)
+            const pos = at(rw.at - dirSign * (RAIL_HALF + 1.8), dirSign);
+            occupy(pos);
+            drawRailLight(ctx, pos.x, pos.y, map.railFlashing(ri, time), time, signAngle(dir));
+          }
+          const along = rw.at - dirSign * (RAIL_HALF + 5);
           placeSign(at(along, dirSign), { x: -dir.x, y: -dir.y }, '129', dir);
         }
-      }
+      });
     }
   }
 }
@@ -554,6 +566,32 @@ function drawTrafficLight(ctx: CanvasRenderingContext2D, x: number, y: number, s
     ctx.fillStyle = on ? color : '#3a3d45';
     ctx.beginPath();
     ctx.arc(0, -1.3 + i * 1.3, 0.5, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+/** ЖД-светофор: два красных фонаря, при «поезде» мигают поочерёдно
+ * (примитив из driving-trainer). */
+function drawRailLight(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  flashing: boolean,
+  time: number,
+  angle: number,
+): void {
+  const blinkOn = time % 0.9 < 0.5;
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(angle);
+  ctx.fillStyle = '#22242a';
+  ctx.fillRect(-1.5, -1, 3, 2);
+  for (const [i, dx] of [-0.7, 0.7].entries()) {
+    const on = flashing && (i === 0 ? blinkOn : !blinkOn);
+    ctx.fillStyle = on ? '#ff3b30' : '#4a1f1f';
+    ctx.beginPath();
+    ctx.arc(dx, 0, 0.5, 0, Math.PI * 2);
     ctx.fill();
   }
   ctx.restore();

@@ -149,7 +149,8 @@ export class RuleMonitor {
     }
     if (approach && approach.d > STOP_ZONE) this.stopTrack = null;
 
-    // --- ЖД-переезд: обязательная полная остановка перед стоп-линией ---
+    // --- ЖД-переезд: со знаком — обязательная полная остановка;
+    // со светофором — нельзя пересекать, пока мигает красный ---
     const railLane = this.map.nearestLane(pos);
     this.map.railways().forEach((rw, i) => {
       if (!railLane || railLane.edge !== rw.edge) {
@@ -169,7 +170,19 @@ export class RuleMonitor {
           prevD: d,
         });
       } else if (d <= 0) {
-        if (st && st.prevD > 0 && moving && st.minSpeed > FULL_STOP_V) emit('railway');
+        if (st && st.prevD > 0 && moving) {
+          if (rw.light) {
+            // мигающий красный: прощается, если при включении мигания
+            // остановиться было уже нельзя (ср. правило жёлтого)
+            const elapsed = this.map.railFlashElapsed(i, time);
+            if (elapsed !== null) {
+              const v = Math.abs(player.speed);
+              if (elapsed * v > (v * v) / 8 + 1) emit('railway');
+            }
+          } else if (st.minSpeed > FULL_STOP_V) {
+            emit('railway');
+          }
+        }
         this.railTrack.delete(i);
       } else {
         this.railTrack.delete(i);
@@ -185,6 +198,10 @@ export class RuleMonitor {
       const exitSide = dirOfVec({ x: pos.x - n.x, y: pos.y - n.y });
       if (st.entrySide !== null && st.oncomingSeen && exitSide === leftExitOf(st.entrySide)) {
         emit('priority');
+      }
+      // разворот под знаком 431: выехал (передом) туда же, откуда въехал
+      if (st.entrySide !== null && exitSide === st.entrySide && n.noUTurn && player.speed > 0.3) {
+        emit('no-u-turn');
       }
       this.inNode = null;
     }

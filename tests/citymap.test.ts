@@ -3,6 +3,8 @@ import {
   CityMap,
   HALF_ROAD,
   LANE_OFF,
+  RAIL_CYCLE,
+  RAIL_FLASH,
   RAIL_HALF,
   ROUNDABOUT_ISLAND_R,
   ROUNDABOUT_R,
@@ -238,17 +240,17 @@ describe('CityMap: круговое движение', () => {
     const m = ring();
     expect(m.isOnRoad({ x: 0, y: 0 })).toBe(false);           // центр островка
     expect(m.isOnRoad({ x: ROUNDABOUT_ISLAND_R - 0.3, y: 0 })).toBe(false);
-    expect(m.isOnRoad({ x: 4, y: 0 })).toBe(true);            // полоса кольца
-    expect(m.isOnRoad({ x: 0, y: -5.5 })).toBe(true);         // кольцо за квадратом
-    expect(m.isOnRoad({ x: 4.4, y: 4.49 })).toBe(true);       // стык горловины и кольца
+    expect(m.isOnRoad({ x: ROUNDABOUT_ISLAND_R + 2.25, y: 0 })).toBe(true); // полоса кольца
+    expect(m.isOnRoad({ x: 0, y: -(ROUNDABOUT_R - 0.5) })).toBe(true);      // у внешнего края
+    expect(m.isOnRoad({ x: 4.6, y: 7.9 })).toBe(true);        // стык горловины и кольца
     expect(m.isOnRoad({ x: ROUNDABOUT_R + 1.7, y: ROUNDABOUT_R + 1.7 })).toBe(false);
   });
 
   it('в зоне узла — по кругу, а не по квадрату', () => {
     const m = ring();
-    expect(m.inNodeArea(0, { x: 0, y: -6 })).toBe(true);   // за квадратом, но на кольце
-    expect(m.inNodeArea(0, { x: 4.45, y: 4.45 })).toBe(false); // угол квадрата вне круга
-    expect(m.inNodeArea(1, { x: 3, y: -103 })).toBe(true); // обычный узел — квадрат
+    expect(m.inNodeArea(0, { x: 0, y: -(ROUNDABOUT_R - 0.1) })).toBe(true); // далеко за квадратом
+    expect(m.inNodeArea(0, { x: 6.5, y: 6.5 })).toBe(false);  // диагональ вне круга
+    expect(m.inNodeArea(1, { x: 3, y: -103 })).toBe(true);    // обычный узел — квадрат
   });
 
   const withinRing = (m: CityMap, pts: { x: number; y: number }[]): void => {
@@ -314,11 +316,28 @@ describe('CityMap: ЖД-переезды', () => {
     expect(rw).toHaveLength(1);
     expect(rw[0].edge).toBe(2);
     expect(rw[0].at).toBe(50);
+    expect(rw[0].light).toBe(false);
     expect(rw[0].axis).toBe('y'); // дорога вертикальна
     expect(rw[0].rect).toEqual({
       xMin: -HALF_ROAD, xMax: HALF_ROAD,
       yMin: 50 - RAIL_HALF, yMax: 50 + RAIL_HALF,
     });
+  });
+
+  it('переезд со светофором: мигание циклично, у знакового света нет', () => {
+    const spec = ringSpec();
+    spec.edges[2].railways = undefined;
+    spec.edges[2].railLights = [50];
+    const m = new CityMap(spec);
+    expect(m.railways()[0].light).toBe(true);
+    // окно мигания [0, RAIL_FLASH), затем тишина до конца цикла
+    expect(m.railFlashing(0, 0)).toBe(true);
+    expect(m.railFlashElapsed(0, 3)).toBeCloseTo(3);
+    expect(m.railFlashing(0, RAIL_FLASH + 0.1)).toBe(false);
+    expect(m.railFlashing(0, RAIL_CYCLE - 0.1)).toBe(false);
+    expect(m.railFlashing(0, RAIL_CYCLE + 1)).toBe(true); // цикл замкнулся
+    // у знакового переезда сигнала нет
+    expect(ring().railFlashing(0, 0)).toBe(false);
   });
 });
 

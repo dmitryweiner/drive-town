@@ -146,6 +146,61 @@ describe('Rules: ЖД-переезд', () => {
     ];
     expect(vs).not.toContain('railway');
   });
+
+  // переезд со светофором: мигает красный при t в [0, 10) каждые 34 с
+  it('со светофором: проезд на мигающий красный — нарушение', () => {
+    const map = cross({ railLightS: true });
+    const mon = new RuleMonitor(map);
+    // линию (y=52.2) пересекаем на ~3-й секунде мигания — тормозить успевал
+    const vs = drive(mon, northRun(70, 40, 6));
+    expect(vs).toContain('railway');
+  });
+
+  it('со светофором: без мигания останавливаться не нужно', () => {
+    const map = cross({ railLightS: true });
+    const mon = new RuleMonitor(map);
+    const vs = drive(mon, northRun(70, 40, 6), { t0: 12 }); // мигание кончилось на 10 с
+    expect(vs).toHaveLength(0);
+  });
+
+  it('со светофором: мигание, включившееся в упор, прощается', () => {
+    const map = cross({ railLightS: true });
+    const mon = new RuleMonitor(map);
+    // цикл 34 с: новое мигание с t=34; пересекаем линию на t≈34.1 —
+    // остановиться уже нельзя (запас меньше тормозного пути)
+    const vs = drive(mon, northRun(76.8, 48, 6), { t0: 30 });
+    expect(vs).not.toContain('railway');
+  });
+});
+
+describe('Rules: знак «разворот запрещён»', () => {
+  const uturnPath = (map: ReturnType<typeof cross>) => [
+    ...northRun(20, 6, 4),
+    ...pathSteps(map.deadEndLoop(0, 2), 3),
+    { x: -2.25, y: 12, heading: S, speed: 4 },
+    { x: -2.25, y: 20, heading: S, speed: 4 },
+  ];
+
+  it('разворот на узле со знаком — нарушение', () => {
+    const map = cross({ control: 'none', noUTurn: true });
+    const mon = new RuleMonitor(map);
+    const vs = drive(mon, uturnPath(map));
+    expect(vs).toContain('no-u-turn');
+  });
+
+  it('без знака разворот легален', () => {
+    const map = cross({ control: 'none' });
+    const mon = new RuleMonitor(map);
+    const vs = drive(mon, uturnPath(map));
+    expect(vs).not.toContain('no-u-turn');
+  });
+
+  it('сквозной проезд под знаком — не разворот', () => {
+    const map = cross({ control: 'none', noUTurn: true });
+    const mon = new RuleMonitor(map);
+    const vs = drive(mon, northRun(20, -20, 5));
+    expect(vs).not.toContain('no-u-turn');
+  });
 });
 
 describe('Rules: круговое движение', () => {
@@ -153,15 +208,20 @@ describe('Rules: круговое движение', () => {
     const map = cross({ control: 'roundabout' });
     const mon = new RuleMonitor(map);
     // NPC кружит по кольцу: восточная точка осевой, курс на север
-    const onRing = actor(4, 0, N, 4, 1);
-    const vs = drive(mon, northRun(20, 4, 5), { vehicles: [onRing] });
+    const onRing = actor(6.75, 0, N, 4, 1);
+    const vs = drive(mon, northRun(20, 5, 5), { vehicles: [onRing] });
     expect(vs).toContain('priority');
   });
 
   it('пустое кольцо — проезд чистый', () => {
     const map = cross({ control: 'roundabout' });
     const mon = new RuleMonitor(map);
-    const vs = drive(mon, northRun(20, -20, 5));
+    // подъезд с юга и «прямо» через кольцо по его траектории
+    const vs = [
+      ...drive(mon, northRun(20, 9.2, 5)),
+      ...drive(mon, pathSteps(map.turnPath(0, 2, 0), 4)),
+      ...drive(mon, northRun(-9.5, -20, 5)),
+    ];
     expect(vs).toHaveLength(0);
   });
 

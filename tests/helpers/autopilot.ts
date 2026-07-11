@@ -200,6 +200,11 @@ export class Autopilot {
     const committed = ap !== null && this.inNodeBox(ap.node, pos);
     if (ap && !committed && ap.d > -2.5 && ap.d < 18) {
       const node = this.map.nodes[ap.node];
+      // нерегулируемый перекрёсток проходим осторожно: правая рука может
+      // «включить» hold в последний момент (NPC пересёк границу квадрата),
+      // и с крейсерской скорости бампер перелетал стоп-линию на 2-3 м —
+      // прямо под дугу левоповоротного NPC
+      if (node.control === 'none' && ap.d < 14) speed = Math.min(speed, 4.5);
       const light = this.map.lightState(ap.node, ap.side, this.round.time);
       if (light === 'red' || light === 'red-yellow') {
         holds.push(ap.d);
@@ -226,19 +231,50 @@ export class Autopilot {
           holds.push(ap.d);
         }
       }
+      // «затор за перекрёстком»: стоящий впереди по курсу (в узле или сразу
+      // за ним) — ждём ЗА стоп-линией. Парковка за линией по follow-дистанции
+      // ставила нас на полосу выезда левоповоротного NPC: клинч либо клип
+      // его дугой (clearToEnter стоящих вне квадрата не видит — это законно)
+      if (ap.d < 15) {
+        for (const n of vehicles) {
+          const dx = n.x - pos.x;
+          const dy = n.y - pos.y;
+          const fwd = dx * Math.cos(heading) + dy * Math.sin(heading);
+          const lat = -dx * Math.sin(heading) + dy * Math.cos(heading);
+          if (fwd > 0 && fwd < ap.d + 13 && Math.abs(lat) < 2.6 && Math.abs(n.speed) < 1) {
+            holds.push(ap.d);
+            break;
+          }
+        }
+      }
     }
 
-    // ЖД-переезды впереди: полная остановка у стоп-линии, потом проезд
+    // ЖД-переезды впереди: со знаком — полная остановка у стоп-линии,
+    // со светофором — стоим при мигании и не подъезжаем под будущее мигание
     this.map.railways().forEach((rw, i) => {
-      if (this.didStopRail.has(i)) return;
+      if (!rw.light && this.didStopRail.has(i)) return;
       const cx = (rw.rect.xMin + rw.rect.xMax) / 2;
       const cy = (rw.rect.yMin + rw.rect.yMax) / 2;
       const dx = cx - pos.x;
       const dy = cy - pos.y;
       const fwd = dx * Math.cos(heading) + dy * Math.sin(heading);
       const lat = -dx * Math.sin(heading) + dy * Math.cos(heading);
-      if (fwd > 25 || Math.abs(lat) > 3) return;
-      const dStop = fwd - RAIL_HALF - 1; // стоп-линия за 1 м до рельсов
+      // только реально ПЕРЕД машиной: без нижней границы далёкий переезд
+      // сзади-сбоку попадал в полосу |lat|<3 и помечался «пройденным»
+      if (fwd < -1 || fwd > 25 || Math.abs(lat) > 3) return;
+      const dStop = fwd - RAIL_HALF - 1; // линия за 1 м до рельсов
+      if (rw.light) {
+        if (dStop < -0.5) return;
+        if (this.map.railFlashing(i, this.round.time)) {
+          // порог чуть строже правила (v²/8+1) — как с жёлтым
+          if (dStop > (v * v) / 8 + 0.8) holds.push(dStop);
+        } else if (dStop > 1) {
+          // к прибытию замигает — плавно остановиться заранее
+          const eta = this.round.time + dStop / Math.max(v, 2);
+          if (this.map.railFlashing(i, eta)) holds.push(dStop);
+        }
+        return;
+      }
       if (dStop < -0.5) {
         this.didStopRail.add(i); // уже за линией (спавн у переезда) — не запираемся
         return;
@@ -256,16 +292,29 @@ export class Autopilot {
       const fwd = dx * Math.cos(heading) + dy * Math.sin(heading);
       const lat = -dx * Math.sin(heading) + dy * Math.cos(heading);
       if (fwd < -1 || fwd > 25 || Math.abs(lat) > 3) return;
+      // к зебре, у которой есть пешеход (хоть и на тротуаре), — не быстрее
+      // 4 м/с: сигнал approaching даёт ~1 с, с крейсерской скорости машина
+      // останавливалась бампером на зебре
+      if (fwd > 0 && fwd < 18 && peds.some((p) => p.crosswalk === i)) {
+        speed = Math.min(speed, 4);
+      }
       // на дороге или идёт к ней — пропускаем
       const pedOn = peds.some((p) => p.crosswalk === i && (p.onRoad || p.approaching === true));
-      if (pedOn) holds.push(fwd - CROSSWALK_LEN / 2 - 0.5);
+      if (pedOn) holds.push(fwd - CROSSWALK_LEN / 2 - 1);
     });
 
     for (const h of holds) {
-      if (h < 0.8) {
+      if (h < 2.2) {
+        // стоп заранее: h меряется до ЦЕНТРА машины, при h≈0 бампер вылезает
+        // на 2 м за линию — на полосу выезда левоповоротного NPC
         speed = 0;
       } else {
-        const room = Math.max(0, h - 1.5 - car.length / 2);
+        // к близкому холду подкрадываемся: на скорости запаздывающий hold
+        // (помеха возникла, когда мы уже близко) давал перелёт стоп-линии
+        // на 2+ м — нос вылезал на полосу выезда левоповоротного NPC
+        // (клинч или клип углом); резерв 2.5 м держит бампер за линией
+        if (h < 12) speed = Math.min(speed, 3);
+        const room = Math.max(0, h - 2.5 - car.length / 2);
         speed = Math.min(speed, Math.sqrt(2 * BRAKE_DECEL * room) * 0.7);
       }
     }
@@ -275,6 +324,12 @@ export class Autopilot {
     }
     if (v < speed - 0.2) {
       return { throttle: clamp((speed - v) * 0.5, 0.2, 1), brake: 0, steer };
+    }
+    if (speed < 0.05 && v > 0.02) {
+      // держимся у стоп-линии ручником: обычный тормоз в мёртвой зоне
+      // контроллера не гасил остаточные ~0.2 м/с, и машина за пару секунд
+      // ДОПОЛЗАЛА бампером до зебры (а тормоз в покое включил бы задний ход)
+      return { throttle: 0, brake: 0, handbrake: 1, steer };
     }
     return { throttle: 0, brake: 0, steer };
   }

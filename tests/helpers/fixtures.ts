@@ -11,6 +11,10 @@ export function cross(opts: {
   crosswalkS?: boolean;
   /** ЖД-переезд на южном луче (e2) в 50 м от центра. */
   railwayS?: boolean;
+  /** ЖД-переезд СО СВЕТОФОРОМ на южном луче (e2) в 50 м от центра. */
+  railLightS?: boolean;
+  /** Знак «разворот запрещён» на центральном узле. */
+  noUTurn?: boolean;
 } = {}): CityMap {
   const spec: CitySpec = {
     nodes: [
@@ -20,6 +24,7 @@ export function cross(opts: {
         mainAxis: opts.mainAxis,
         minorSign: opts.minorSign,
         lightOffset: 0,
+        noUTurn: opts.noUTurn,
       },
       { x: 0, y: -100 },
       { x: 100, y: 0 },
@@ -29,7 +34,12 @@ export function cross(opts: {
     edges: [
       { a: 1, b: 0 },
       { a: 0, b: 2, oneWay: opts.oneWayE ? true : undefined },
-      { a: 0, b: 3, crosswalks: opts.crosswalkS ? [50] : undefined, railways: opts.railwayS ? [50] : undefined },
+      {
+        a: 0, b: 3,
+        crosswalks: opts.crosswalkS ? [50] : undefined,
+        railways: opts.railwayS ? [50] : undefined,
+        railLights: opts.railLightS ? [50] : undefined,
+      },
       { a: 4, b: 0 },
     ],
   };

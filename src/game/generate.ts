@@ -160,6 +160,12 @@ export function generateLevel(seed: number): Level {
     }
     n.control = 'none';
   });
+  // знак «разворот запрещён» — на части перекрёстков (кольцу не нужен:
+  // разворот по кольцу — легальный манёвр)
+  nodes.forEach((n, i) => {
+    if (deg[i] < 3 || n.control === 'roundabout') return;
+    if (rng() < 0.15) n.noUTurn = true;
+  });
 
   // зебры в глубине длинных рёбер + зоны ограничения скорости
   // (у переходов — 30, в прочих местах для разнообразия — 40)
@@ -171,7 +177,10 @@ export function generateLevel(seed: number): Level {
       e.crosswalks = [randInt(rng, 20, Math.floor(len - 20))];
       if (rng() < 0.6) e.speedLimit = 30;
     } else if (rails < 2 && len >= 60 && rng() < 0.12) {
-      e.railways = [randInt(rng, 22, Math.floor(len - 22))];
+      // половина переездов — со знаком и стоп-линией, половина — со светофором
+      const at = randInt(rng, 22, Math.floor(len - 22));
+      if (rng() < 0.5) e.railways = [at];
+      else e.railLights = [at];
       rails++;
     } else if (rng() < 0.1) {
       e.speedLimit = 40;
