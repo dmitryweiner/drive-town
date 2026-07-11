@@ -158,18 +158,14 @@ body.is-mobile #mobile-controls { display: block; }
   #speedo { font-size: 42px; }
 }
 
-/* в мобильном режиме миникарта по центру правого края:
-   внизу она мешалась кнопкам газа/тормоза */
+/* в мобильном режиме миникарта прижата вправо и поднята НАД кнопками
+   руля (28px отступ + 74px кнопка + зазор) */
 body.is-mobile #minimap {
-  top: 50%;
-  bottom: auto;
-  transform: translateY(-50%);
+  bottom: 116px;
 }
 @media (hover: none) and (pointer: coarse) {
   #minimap {
-    top: 50%;
-    bottom: auto;
-    transform: translateY(-50%);
+    bottom: 116px;
   }
 }
 
