@@ -140,12 +140,16 @@ export function generateLevel(seed: number): Level {
   nodes.forEach((n, i) => {
     if (deg[i] < 3) return;
     const roll = rng();
-    if (roll < 0.3) {
+    if (roll < 0.12) {
+      n.control = 'roundabout';
+      return;
+    }
+    if (roll < 0.38) {
       n.control = 'lights';
       n.lightOffset = Math.floor(rng() * LIGHT_CYCLE);
       return;
     }
-    if (roll < 0.75) {
+    if (roll < 0.78) {
       const hThrough = sides[i].E !== undefined && sides[i].W !== undefined;
       const vThrough = sides[i].N !== undefined && sides[i].S !== undefined;
       if (!hThrough && !vThrough) return; // не бывает при degree>=3, но на всякий
@@ -157,13 +161,18 @@ export function generateLevel(seed: number): Level {
     n.control = 'none';
   });
 
-  // зебры в глубине длинных рёбер + зоны ограничения скорости:
-  // у переходов — 30, в прочих местах для разнообразия — 40
+  // зебры в глубине длинных рёбер + зоны ограничения скорости
+  // (у переходов — 30, в прочих местах для разнообразия — 40)
+  // + пара ЖД-переездов на длинных рёбрах без зебр
+  let rails = 0;
   for (const e of edges) {
     const len = Math.hypot(nodes[e.b].x - nodes[e.a].x, nodes[e.b].y - nodes[e.a].y);
     if (len >= 55 && rng() < 0.35) {
       e.crosswalks = [randInt(rng, 20, Math.floor(len - 20))];
       if (rng() < 0.6) e.speedLimit = 30;
+    } else if (rails < 2 && len >= 60 && rng() < 0.12) {
+      e.railways = [randInt(rng, 22, Math.floor(len - 22))];
+      rails++;
     } else if (rng() < 0.1) {
       e.speedLimit = 40;
     }

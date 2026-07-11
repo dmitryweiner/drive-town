@@ -126,6 +126,76 @@ describe('Rules: знак «стоп»', () => {
   });
 });
 
+describe('Rules: ЖД-переезд', () => {
+  // рельсы на южном луче в 50 м от центра; стоп-линия на y = 52.2
+  it('проезд без полной остановки — нарушение', () => {
+    const map = cross({ railwayS: true });
+    const mon = new RuleMonitor(map);
+    const vs = drive(mon, northRun(70, 40, 6));
+    expect(vs).toContain('railway');
+    expect(vs.filter((v) => v === 'railway')).toHaveLength(1);
+  });
+
+  it('с полной остановкой перед переездом — чисто', () => {
+    const map = cross({ railwayS: true });
+    const mon = new RuleMonitor(map);
+    const vs = [
+      ...drive(mon, northRun(70, 54, 5)),
+      ...drive(mon, Array.from({ length: 20 }, () => ({ x: 2.25, y: 54, heading: N, speed: 0 }))),
+      ...drive(mon, northRun(54, 40, 4)),
+    ];
+    expect(vs).not.toContain('railway');
+  });
+});
+
+describe('Rules: круговое движение', () => {
+  it('въезд на кольцо при машине на кольце — нарушение приоритета', () => {
+    const map = cross({ control: 'roundabout' });
+    const mon = new RuleMonitor(map);
+    // NPC кружит по кольцу: восточная точка осевой, курс на север
+    const onRing = actor(4, 0, N, 4, 1);
+    const vs = drive(mon, northRun(20, 4, 5), { vehicles: [onRing] });
+    expect(vs).toContain('priority');
+  });
+
+  it('пустое кольцо — проезд чистый', () => {
+    const map = cross({ control: 'roundabout' });
+    const mon = new RuleMonitor(map);
+    const vs = drive(mon, northRun(20, -20, 5));
+    expect(vs).toHaveLength(0);
+  });
+
+  it('на кольце нет правила «левый под встречного»', () => {
+    const map = cross({ control: 'roundabout' });
+    const mon = new RuleMonitor(map);
+    // встречный подъезжает с севера, а мы уходим с юга налево (на запад)
+    const oncoming = actor(-2.25, -10, S, 8, 1);
+    const path = pathSteps(map.turnPath(0, 2, 3), 4);
+    const vs = [
+      ...drive(mon, northRun(20, 6, 4)),
+      ...drive(mon, path, { vehicles: [oncoming] }),
+      ...drive(mon, [{ x: -12, y: -2.25, heading: W, speed: 4 }], { vehicles: [oncoming] }),
+    ];
+    expect(vs).not.toContain('priority');
+  });
+});
+
+/** Шаги вдоль полилинии с курсом по сегментам. */
+function pathSteps(pts: { x: number; y: number }[], speed: number): { x: number; y: number; heading: number; speed: number }[] {
+  const out: { x: number; y: number; heading: number; speed: number }[] = [];
+  const step = speed * 0.05;
+  for (let i = 1; i < pts.length; i++) {
+    const dx = pts[i].x - pts[i - 1].x;
+    const dy = pts[i].y - pts[i - 1].y;
+    const len = Math.hypot(dx, dy);
+    const heading = Math.atan2(dy, dx);
+    for (let s = 0; s < len; s += step) {
+      out.push({ x: pts[i - 1].x + (dx * s) / len, y: pts[i - 1].y + (dy * s) / len, heading, speed });
+    }
+  }
+  return out;
+}
+
 describe('Rules: приоритет', () => {
   it('выезд со второстепенной под машину на главной — нарушение', () => {
     const map = cross({ control: 'priority', mainAxis: 'h', minorSign: 'yield' });

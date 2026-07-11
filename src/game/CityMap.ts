@@ -15,6 +15,16 @@ const CURB_PAD = 1.5;
 export const DEFAULT_SPEED_LIMIT = 50;
 /** Длина зебры вдоль дороги. */
 export const CROSSWALK_LEN = 3;
+/** Полуширина полотна рельсов ЖД-переезда вдоль дороги. */
+export const RAIL_HALF = 1.2;
+
+/** Круговое движение: островок, осевая кольцевой полосы, внешний край.
+ * Осевая R=4 больше минимального радиуса машины (~3.5 м). */
+export const ROUNDABOUT_ISLAND_R = 1.75;
+export const ROUNDABOUT_LANE_R = ROUNDABOUT_ISLAND_R + LANE_W / 2;
+export const ROUNDABOUT_R = ROUNDABOUT_ISLAND_R + LANE_W;
+/** Радиус въездной/выездной дуги кольца (S-сопряжение с полосой). */
+const RING_JOIN_R = 4.5;
 
 /** Светофорный цикл: вертикальная группа (подъезды N/S) зелёная первой. */
 const G = 8;
@@ -38,6 +48,15 @@ export interface Crosswalk {
   at: number;
   rect: Rect;
   /** Ось ДОРОГИ ('x' — дорога горизонтальна, пешеход идёт по y). */
+  axis: 'x' | 'y';
+}
+
+export interface RailCrossing {
+  edge: number;
+  /** Метры от центра узла a. */
+  at: number;
+  rect: Rect;
+  /** Ось ДОРОГИ ('x' — дорога горизонтальна, рельсы идут по y). */
   axis: 'x' | 'y';
 }
 
@@ -81,6 +100,7 @@ export class CityMap {
   readonly buildings: Rect[];
   private readonly nodeEdgeMap: Partial<Record<Dir, number>>[];
   private readonly crosswalkList: Crosswalk[];
+  private readonly railwayList: RailCrossing[];
 
   constructor(spec: CitySpec) {
     this.nodes = spec.nodes;
@@ -112,6 +132,24 @@ export class CityMap {
           rect: horizontal
             ? { xMin: cx - CROSSWALK_LEN / 2, xMax: cx + CROSSWALK_LEN / 2, yMin: cy - HALF_ROAD, yMax: cy + HALF_ROAD }
             : { xMin: cx - HALF_ROAD, xMax: cx + HALF_ROAD, yMin: cy - CROSSWALK_LEN / 2, yMax: cy + CROSSWALK_LEN / 2 },
+        });
+      }
+    });
+    this.railwayList = [];
+    this.edges.forEach((e, id) => {
+      for (const at of e.railways ?? []) {
+        const a = this.nodes[e.a];
+        const u = this.edgeUnit(id);
+        const cx = a.x + u.x * at;
+        const cy = a.y + u.y * at;
+        const horizontal = u.y === 0;
+        this.railwayList.push({
+          edge: id,
+          at,
+          axis: horizontal ? 'x' : 'y',
+          rect: horizontal
+            ? { xMin: cx - RAIL_HALF, xMax: cx + RAIL_HALF, yMin: cy - HALF_ROAD, yMax: cy + HALF_ROAD }
+            : { xMin: cx - HALF_ROAD, xMax: cx + HALF_ROAD, yMin: cy - RAIL_HALF, yMax: cy + RAIL_HALF },
         });
       }
     });
@@ -151,6 +189,21 @@ export class CityMap {
     return Math.hypot(b.x - a.x, b.y - a.y);
   }
 
+  /** Радиус зоны узла: у кольца — внешний край, у обычного — полуквадрат. */
+  nodeRadius(nodeId: number): number {
+    return this.nodes[nodeId].control === 'roundabout' ? ROUNDABOUT_R : HALF_ROAD;
+  }
+
+  /** Точка в зоне узла: круг у кольца, квадрат у обычного перекрёстка. */
+  inNodeArea(nodeId: number, p: Vec2): boolean {
+    const n = this.nodes[nodeId];
+    if (n.control === 'roundabout') {
+      return Math.hypot(p.x - n.x, p.y - n.y) <= ROUNDABOUT_R;
+    }
+    const b = this.nodeBox(nodeId);
+    return p.x >= b.xMin && p.x <= b.xMax && p.y >= b.yMin && p.y <= b.yMax;
+  }
+
   /** Квадрат перекрёстка. */
   nodeBox(nodeId: number): Rect {
     const n = this.nodes[nodeId];
@@ -182,6 +235,25 @@ export class CityMap {
 
   isOnRoad(p: Vec2): boolean {
     for (let i = 0; i < this.nodes.length; i++) {
+      const n = this.nodes[i];
+      if (n.control === 'roundabout') {
+        // кольцо: полотно — кольцевая полоса, островок — не дорога
+        const d = Math.hypot(p.x - n.x, p.y - n.y);
+        if (d <= ROUNDABOUT_R && d >= ROUNDABOUT_ISLAND_R) return true;
+        // подушки на стыках горловин с внешним краем кольца
+        const along = Math.sqrt(ROUNDABOUT_R * ROUNDABOUT_R - HALF_ROAD * HALF_ROAD);
+        for (const side of Object.keys(this.nodeEdgeMap[i])) {
+          if (side !== 'N' && side !== 'E' && side !== 'S' && side !== 'W') continue;
+          const dir = DIR_VEC[side];
+          const rt = rightOf(dir);
+          for (const s of [1, -1]) {
+            const cx = n.x + dir.x * along + rt.x * HALF_ROAD * s;
+            const cy = n.y + dir.y * along + rt.y * HALF_ROAD * s;
+            if (Math.hypot(p.x - cx, p.y - cy) <= CURB_PAD) return true;
+          }
+        }
+        continue;
+      }
       const b = this.nodeBox(i);
       if (p.x >= b.xMin && p.x <= b.xMax && p.y >= b.yMin && p.y <= b.yMax) return true;
       for (const cx of [b.xMin, b.xMax]) {
@@ -249,7 +321,7 @@ export class CityMap {
     const sign = e.a === nodeId ? -1 : 1;
     const toNode = { x: u.x * sign, y: u.y * sign };
     const distToCenter = (n.x - p.x) * toNode.x + (n.y - p.y) * toNode.y;
-    return distToCenter - HALF_ROAD - STOP_LINE_OFFSET;
+    return distToCenter - this.nodeRadius(nodeId) - STOP_LINE_OFFSET;
   }
 
   /** Точки проезда узла с полосы въезда (inEdge) на полосу выезда (outEdge):
@@ -263,6 +335,12 @@ export class CityMap {
     const o = DIR_VEC[outSide];          // направление движения наружу
     const rf = rightOf(f);
     const ro = rightOf(o);
+    if (this.nodes[nodeId].control === 'roundabout') {
+      // правый поворот срезает по обычной дуге R=4.5 (она остаётся на
+      // полотне кольца); прямо/налево/разворот — по кольцу вокруг островка
+      const rightTurn = inSide !== outSide && f.x * o.y - f.y * o.x > 0;
+      if (!rightTurn) return this.ringPath(nodeId, inSide, outSide);
+    }
     const entry: Vec2 = {
       x: n.x - f.x * HALF_ROAD + rf.x * LANE_OFF,
       y: n.y - f.y * HALF_ROAD + rf.y * LANE_OFF,
@@ -300,6 +378,38 @@ export class CityMap {
       pts.push({ x: c.x + R * Math.cos(phi), y: c.y + R * Math.sin(phi) });
     }
     return pts;
+  }
+
+  /** Проезд кольца: въездная дуга (S-сопряжение полосы с кольцом), дуга
+   * по кольцу против часовой (на экране), выездная дуга. Работает и для
+   * разворота (inSide === outSide). */
+  private ringPath(nodeId: number, inSide: Dir, outSide: Dir): Vec2[] {
+    const n = this.nodes[nodeId];
+    const f = DIR_VEC[opposite(inSide)];
+    const o = DIR_VEC[outSide];
+    const rf = rightOf(f);
+    const ro = rightOf(o);
+    const rc = ROUNDABOUT_LANE_R;
+    const re = RING_JOIN_R;
+    const off = LANE_OFF + re;
+    // центр въездной дуги: внешне касается кольца (двигаемся в одну сторону)
+    const back = Math.sqrt((re + rc) * (re + rc) - off * off);
+    const c: Vec2 = { x: n.x, y: n.y };
+    const ce: Vec2 = { x: n.x - f.x * back + rf.x * off, y: n.y - f.y * back + rf.y * off };
+    const cx: Vec2 = { x: n.x + o.x * back + ro.x * off, y: n.y + o.y * back + ro.y * off };
+    const p0: Vec2 = { x: n.x - f.x * back + rf.x * LANE_OFF, y: n.y - f.y * back + rf.y * LANE_OFF };
+    const p1: Vec2 = { x: n.x + o.x * back + ro.x * LANE_OFF, y: n.y + o.y * back + ro.y * LANE_OFF };
+    const tIn = toward(ce, c, re);
+    const tOut = toward(cx, c, re);
+    const pts: Vec2[] = [];
+    appendArc(pts, ce, re, angleAt(p0, ce), angleAt(tIn, ce), 1);
+    appendArc(pts, c, rc, angleAt(tIn, c), angleAt(tOut, c), -1);
+    appendArc(pts, cx, re, angleAt(tOut, cx), angleAt(p1, cx), 1);
+    return pts;
+  }
+
+  railways(): RailCrossing[] {
+    return this.railwayList;
   }
 
   /** Разворот в тупике: подъезд по своей полосе, полукруг, выезд по встречной. */
@@ -428,4 +538,26 @@ function lineIntersect(p: Vec2, d: Vec2, q: Vec2, e: Vec2): Vec2 {
   const denom = d.x * e.y - d.y * e.x;
   const t = ((q.x - p.x) * e.y - (q.y - p.y) * e.x) / denom;
   return { x: p.x + d.x * t, y: p.y + d.y * t };
+}
+
+/** Точка на расстоянии r от from в сторону to. */
+function toward(from: Vec2, to: Vec2, r: number): Vec2 {
+  const d = Math.hypot(to.x - from.x, to.y - from.y);
+  return { x: from.x + ((to.x - from.x) / d) * r, y: from.y + ((to.y - from.y) / d) * r };
+}
+
+function angleAt(p: Vec2, center: Vec2): number {
+  return Math.atan2(p.y - center.y, p.x - center.x);
+}
+
+/** Дуга от a0 к a1 вокруг center; sgn>0 — угол растёт (по часовой на
+ * экране), sgn<0 — убывает. Первая точка не дублируется. */
+function appendArc(pts: Vec2[], center: Vec2, r: number, a0: number, a1: number, sgn: number): void {
+  if (sgn > 0) while (a1 < a0) a1 += 2 * Math.PI;
+  else while (a1 > a0) a1 -= 2 * Math.PI;
+  const steps = Math.max(2, Math.ceil(Math.abs(a1 - a0) / 0.3));
+  for (let i = pts.length === 0 ? 0 : 1; i <= steps; i++) {
+    const phi = a0 + ((a1 - a0) * i) / steps;
+    pts.push({ x: center.x + r * Math.cos(phi), y: center.y + r * Math.sin(phi) });
+  }
 }

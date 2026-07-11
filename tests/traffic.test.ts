@@ -134,6 +134,60 @@ describe('Traffic: знак «стоп» и приоритет', () => {
   });
 });
 
+describe('Traffic: ЖД-переезд', () => {
+  it('NPC полностью останавливается перед переездом и потом проезжает', () => {
+    const map = cross({ railwayS: true }); // рельсы на e2, 50 м от центра
+    const tr = new Traffic(map, mulberry32(9), {
+      vehicles: [{ kind: 'car', edge: 2, dirSign: 1, along: 20 }],
+    });
+    let minNearLine = Infinity;
+    let maxAlong = 0;
+    for (let t = 0; t < 30; t += DT) {
+      tr.update(DT, t, null);
+      const v = tr.vehicleViews()[0];
+      // едет на юг по e2: along ≈ y; стоп-линия на y = 47.8
+      if (v.y > 43 && v.y < 48.5) minNearLine = Math.min(minNearLine, Math.abs(v.speed));
+      maxAlong = Math.max(maxAlong, v.y);
+    }
+    expect(minNearLine).toBeLessThan(0.08); // полная остановка в стоп-зоне
+    expect(maxAlong).toBeGreaterThan(60);   // и поехал дальше через рельсы
+  });
+});
+
+describe('Traffic: круговое движение', () => {
+  it('NPC проезжает кольцо, оставаясь на полотне и объезжая островок', () => {
+    const map = cross({ control: 'roundabout' });
+    const tr = new Traffic(map, mulberry32(11), {
+      vehicles: [{ kind: 'car', edge: 0, dirSign: 1, along: 40 }],
+    });
+    let wasInRing = false;
+    let leftRing = false;
+    for (let t = 0; t < 60; t += DT) {
+      tr.update(DT, t, null);
+      const v = tr.vehicleViews()[0];
+      const d = Math.hypot(v.x, v.y);
+      expect(map.isOnRoad({ x: v.x, y: v.y }), `NPC вне дороги: ${v.x},${v.y}`).toBe(true);
+      if (d < 6) wasInRing = true;
+      if (wasInRing && d > 12) leftRing = true;
+    }
+    expect(wasInRing).toBe(true);
+    expect(leftRing).toBe(true);
+  });
+
+  it('NPC не въезжает на занятое кольцо', () => {
+    const map = cross({ control: 'roundabout' });
+    const tr = new Traffic(map, mulberry32(12), {
+      vehicles: [{ kind: 'car', edge: 0, dirSign: 1, along: 80 }],
+    });
+    // игрок «кружит» по кольцу: точка на осевой кольца с ненулевой скоростью
+    const player: ActorView = { id: -1, x: 4, y: 0, heading: -Math.PI / 2, speed: 4, length: 4, width: 2 };
+    for (let t = 0; t < 12; t += DT) tr.update(DT, t, player);
+    const v = tr.vehicleViews()[0];
+    // NPC добрался к кольцу, но внутрь не сунулся
+    expect(Math.hypot(v.x, v.y)).toBeGreaterThan(6.25);
+  });
+});
+
 describe('Traffic: клаксон (детекция всегда активна, звук — дело UI)', () => {
   const S = Math.PI / 2; // курс на юг
   const player = (x: number, y: number, heading: number, speed: number): ActorView =>

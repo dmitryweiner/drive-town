@@ -70,6 +70,22 @@ describe('generateLevel: инварианты для пачки seed', () => {
         expect(cw.at).toBeGreaterThanOrEqual(12);
         expect(cw.at).toBeLessThanOrEqual(m.edgeLen(cw.edge) - 12);
       }
+
+      // кольца — только на перекрёстках (нужны въезды-выезды)
+      m.nodes.forEach((n, id) => {
+        if (n.control === 'roundabout') {
+          expect(m.degree(id)).toBeGreaterThanOrEqual(3);
+        }
+      });
+
+      // ЖД-переезды: не больше двух, в глубине ребра и не вместе с зеброй
+      const rails = m.railways();
+      expect(rails.length).toBeLessThanOrEqual(2);
+      for (const rw of rails) {
+        expect(rw.at).toBeGreaterThanOrEqual(20);
+        expect(rw.at).toBeLessThanOrEqual(m.edgeLen(rw.edge) - 20);
+        expect(m.edges[rw.edge].crosswalks).toBeUndefined();
+      }
     });
 
     it(`seed=${seed}: дома не пересекают дороги`, () => {
@@ -110,6 +126,20 @@ describe('generateLevel: инварианты для пачки seed', () => {
       expect(level.routeLen).toBeGreaterThan(0);
     });
   }
+});
+
+describe('generateLevel: новые кейсы встречаются', () => {
+  it('на пачке сидов попадаются и кольца, и ЖД-переезды', () => {
+    let rings = 0;
+    let rails = 0;
+    for (let seed = 1; seed <= 40; seed++) {
+      const m = generateLevel(seed).map;
+      rings += m.nodes.filter((n) => n.control === 'roundabout').length;
+      rails += m.railways().length;
+    }
+    expect(rings).toBeGreaterThan(10);
+    expect(rails).toBeGreaterThan(10);
+  });
 });
 
 describe('generateLevel: односторонки целыми улицами', () => {

@@ -4,7 +4,7 @@ import type { Level } from '../../src/game/generate';
 import { approachOf, type ActorView } from '../../src/game/Rules';
 import type { Round } from '../../src/game/Round';
 import { clearToEnter, turnKindOf, type TurnKind } from '../../src/game/Traffic';
-import { CROSSWALK_LEN } from '../../src/game/CityMap';
+import { CROSSWALK_LEN, RAIL_HALF } from '../../src/game/CityMap';
 
 const CRUISE = 8;
 const TURN_SPEED = 3;
@@ -25,6 +25,7 @@ export class Autopilot {
   private readonly cum: number[];
   private readonly nodePlans = new Map<number, NodePlan>();
   private readonly didStop = new Set<number>();
+  private readonly didStopRail = new Set<number>();
   private s = 0;
 
   constructor(private readonly round: Round) {
@@ -67,10 +68,8 @@ export class Autopilot {
     let edge = spawnEdge;
     let dirSign = spawnDirSign;
     for (const hop of hops) {
-      const turnPts =
-        hop.nextEdge === hop.edge
-          ? map.deadEndLoop(hop.node, hop.edge)
-          : map.turnPath(hop.node, hop.edge, hop.nextEdge);
+      // turnPath сам разруливает разворот: тупик — deadEndLoop, кольцо — по кольцу
+      const turnPts = map.turnPath(hop.node, hop.edge, hop.nextEdge);
       this.nodePlans.set(hop.node, {
         inEdge: hop.edge,
         outEdge: hop.nextEdge,
@@ -229,6 +228,25 @@ export class Autopilot {
       }
     }
 
+    // ЖД-переезды впереди: полная остановка у стоп-линии, потом проезд
+    this.map.railways().forEach((rw, i) => {
+      if (this.didStopRail.has(i)) return;
+      const cx = (rw.rect.xMin + rw.rect.xMax) / 2;
+      const cy = (rw.rect.yMin + rw.rect.yMax) / 2;
+      const dx = cx - pos.x;
+      const dy = cy - pos.y;
+      const fwd = dx * Math.cos(heading) + dy * Math.sin(heading);
+      const lat = -dx * Math.sin(heading) + dy * Math.cos(heading);
+      if (fwd > 25 || Math.abs(lat) > 3) return;
+      const dStop = fwd - RAIL_HALF - 1; // стоп-линия за 1 м до рельсов
+      if (dStop < -0.5) {
+        this.didStopRail.add(i); // уже за линией (спавн у переезда) — не запираемся
+        return;
+      }
+      holds.push(dStop);
+      if (Math.abs(v) < 0.08 && dStop < 6) this.didStopRail.add(i);
+    });
+
     // зебры с пешеходами на текущем пути
     const peds = this.round.traffic.pedViews();
     this.map.crosswalks().forEach((cw, i) => {
@@ -279,8 +297,7 @@ export class Autopilot {
   }
 
   private inNodeBox(nodeId: number, p: Vec2): boolean {
-    const n = this.map.nodes[nodeId];
-    return Math.abs(p.x - n.x) <= 4.5 && Math.abs(p.y - n.y) <= 4.5;
+    return this.map.inNodeArea(nodeId, p);
   }
 
   /** approachOf по курсу, когда стоим (approachOf требует движения). */

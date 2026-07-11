@@ -5,6 +5,9 @@ import {
   CROSSWALK_LEN,
   DIR_VEC,
   HALF_ROAD,
+  RAIL_HALF,
+  ROUNDABOUT_ISLAND_R,
+  ROUNDABOUT_R,
   STOP_LINE_OFFSET,
   opposite,
   rightOf,
@@ -115,6 +118,13 @@ export class Renderer {
       ctx.fillRect(r.xMin, r.yMin, r.xMax - r.xMin, r.yMax - r.yMin);
     }
     for (let i = 0; i < map.nodes.length; i++) {
+      const n = map.nodes[i];
+      if (n.control === 'roundabout') {
+        ctx.beginPath();
+        ctx.arc(n.x, n.y, ROUNDABOUT_R, 0, Math.PI * 2);
+        ctx.fill();
+        continue;
+      }
       const b = map.nodeBox(i);
       ctx.fillRect(b.xMin, b.yMin, b.xMax - b.xMin, b.yMax - b.yMin);
     }
@@ -143,8 +153,16 @@ export class Renderer {
     // стоп-линии на регулируемых подъездах
     for (let i = 0; i < map.nodes.length; i++) this.drawStopLines(ctx, map, i);
 
+    // кольца: островок, кромка, линии «уступи» на въездах
+    for (let i = 0; i < map.nodes.length; i++) {
+      if (map.nodes[i].control === 'roundabout') this.drawRoundabout(ctx, map, i);
+    }
+
     // зебры
     for (const cw of map.crosswalks()) drawZebra(ctx, cw.rect);
+
+    // ЖД-переезды со стоп-линиями
+    for (const rw of map.railways()) this.drawRailway(ctx, map, rw);
 
     // отметка лимита на асфальте в начале зоны
     ctx.fillStyle = 'rgba(255,255,255,0.85)';
@@ -164,22 +182,25 @@ export class Renderer {
   }
 
   private drawEdgeMarkings(ctx: CanvasRenderingContext2D, map: CityMap, edgeId: number): void {
-    const r = map.edgeRoadRect(edgeId);
     const e = map.edges[edgeId];
     const a = map.nodes[e.a];
+    const b = map.nodes[e.b];
     const u = map.edgeUnit(edgeId);
     const vertical = u.y !== 0;
+    // разметка от края зоны узла до края зоны узла (у кольца зона шире)
+    const s = { x: a.x + u.x * map.nodeRadius(e.a), y: a.y + u.y * map.nodeRadius(e.a) };
+    const t = { x: b.x - u.x * map.nodeRadius(e.b), y: b.y - u.y * map.nodeRadius(e.b) };
     ctx.strokeStyle = MARK;
     const line = (lat: number, dashed: boolean, width: number): void => {
       ctx.lineWidth = width;
       ctx.setLineDash(dashed ? [1.8, 1.8] : []);
       ctx.beginPath();
       if (vertical) {
-        ctx.moveTo(a.x + lat, r.yMin);
-        ctx.lineTo(a.x + lat, r.yMax);
+        ctx.moveTo(a.x + lat, s.y);
+        ctx.lineTo(a.x + lat, t.y);
       } else {
-        ctx.moveTo(r.xMin, a.y + lat);
-        ctx.lineTo(r.xMax, a.y + lat);
+        ctx.moveTo(s.x, a.y + lat);
+        ctx.lineTo(t.x, a.y + lat);
       }
       ctx.stroke();
       ctx.setLineDash([]);
@@ -205,6 +226,7 @@ export class Renderer {
 
   /** Кромка узла со сторон, где нет дорог (углы, тупики). */
   private drawNodeOutline(ctx: CanvasRenderingContext2D, map: CityMap, nodeId: number): void {
+    if (map.nodes[nodeId].control === 'roundabout') return; // своя кромка
     const b = map.nodeBox(nodeId);
     const edges = map.nodeEdges(nodeId);
     ctx.strokeStyle = MARK;
@@ -248,6 +270,96 @@ export class Renderer {
       ctx.lineTo(base.x + rt.x * HALF_ROAD, base.y + rt.y * HALF_ROAD);
       ctx.stroke();
       ctx.setLineDash([]);
+    }
+  }
+
+  /** Кольцо: островок с кромкой, внешняя кромка между горловинами,
+   * пунктирные линии «уступи» на въездах. */
+  private drawRoundabout(ctx: CanvasRenderingContext2D, map: CityMap, nodeId: number): void {
+    const n = map.nodes[nodeId];
+    // островок
+    ctx.fillStyle = GRASS;
+    ctx.beginPath();
+    ctx.arc(n.x, n.y, ROUNDABOUT_ISLAND_R, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = MARK;
+    ctx.lineWidth = 0.22;
+    ctx.stroke();
+    // внешняя кромка — дуги между горловинами подъездов
+    const halfMouth = Math.asin(HALF_ROAD / ROUNDABOUT_R);
+    const mouths: number[] = [];
+    for (const side of SIDES) {
+      if (map.nodeEdges(nodeId)[side] === undefined) continue;
+      const d = DIR_VEC[side];
+      mouths.push(Math.atan2(d.y, d.x));
+    }
+    mouths.sort((a, b) => a - b);
+    for (let i = 0; i < mouths.length; i++) {
+      const from = mouths[i] + halfMouth;
+      const to = (i + 1 < mouths.length ? mouths[i + 1] : mouths[0] + 2 * Math.PI) - halfMouth;
+      if (to <= from) continue;
+      ctx.beginPath();
+      ctx.arc(n.x, n.y, ROUNDABOUT_R, from, to);
+      ctx.stroke();
+    }
+    // «уступи дорогу» на каждом въезде: пунктир поперёк въездной полосы
+    ctx.lineWidth = 0.3;
+    ctx.setLineDash([0.8, 0.8]);
+    for (const side of SIDES) {
+      const edgeId = map.nodeEdges(nodeId)[side];
+      if (edgeId === undefined) continue;
+      if (!map.canTravel(edgeId, map.otherNode(edgeId, nodeId))) continue;
+      const f = DIR_VEC[opposite(side)]; // направление движения к узлу
+      const rt = rightOf(f);
+      const base = {
+        x: n.x - f.x * (ROUNDABOUT_R + STOP_LINE_OFFSET),
+        y: n.y - f.y * (ROUNDABOUT_R + STOP_LINE_OFFSET),
+      };
+      ctx.beginPath();
+      ctx.moveTo(base.x, base.y);
+      ctx.lineTo(base.x + rt.x * HALF_ROAD, base.y + rt.y * HALF_ROAD);
+      ctx.stroke();
+    }
+    ctx.setLineDash([]);
+  }
+
+  /** ЖД-переезд: насыпь, шпалы, рельсы поперёк дороги, стоп-линии. */
+  private drawRailway(ctx: CanvasRenderingContext2D, map: CityMap, rw: { edge: number; at: number }): void {
+    const e = map.edges[rw.edge];
+    const a = map.nodes[e.a];
+    const u = map.edgeUnit(rw.edge);
+    const cx = a.x + u.x * rw.at;
+    const cy = a.y + u.y * rw.at;
+    const half = HALF_ROAD + 2.5; // рельсы выходят за полотно на обочины
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(Math.atan2(u.y, u.x)); // локально: x — вдоль дороги
+    ctx.fillStyle = '#2b2e35'; // насыпь
+    ctx.fillRect(-RAIL_HALF, -half, RAIL_HALF * 2, half * 2);
+    ctx.fillStyle = '#4a3b2a'; // шпалы
+    for (let yy = -half + 0.5; yy <= half - 0.5; yy += 1.1) {
+      ctx.fillRect(-RAIL_HALF + 0.12, yy - 0.18, RAIL_HALF * 2 - 0.24, 0.36);
+    }
+    ctx.strokeStyle = '#b9bec8'; // рельсы
+    ctx.lineWidth = 0.18;
+    for (const xx of [-0.65, 0.65]) {
+      ctx.beginPath();
+      ctx.moveTo(xx, -half);
+      ctx.lineTo(xx, half);
+      ctx.stroke();
+    }
+    ctx.restore();
+    // стоп-линии перед переездом на каждой въездной полосе
+    ctx.strokeStyle = MARK;
+    ctx.lineWidth = 0.5;
+    for (const dirSign of map.allowedDirSigns(rw.edge)) {
+      const along = rw.at - dirSign * (RAIL_HALF + STOP_LINE_OFFSET);
+      const p = { x: a.x + u.x * along, y: a.y + u.y * along };
+      const rt = rightOf({ x: u.x * dirSign, y: u.y * dirSign });
+      ctx.beginPath();
+      ctx.moveTo(p.x, p.y);
+      ctx.lineTo(p.x + rt.x * HALF_ROAD, p.y + rt.y * HALF_ROAD);
+      ctx.stroke();
     }
   }
 
@@ -303,7 +415,7 @@ export class Renderer {
         const edgeId = map.nodeEdges(i)[side];
         if (edgeId === undefined) continue;
         const canEnter = map.canTravel(edgeId, map.otherNode(edgeId, i));
-        const pos = signPos(n, side, 0);
+        const pos = signPos(n, side, 0, map.nodeRadius(i));
         if (n.control === 'lights' && canEnter) {
           occupy(pos);
           drawTrafficLight(ctx, pos.x, pos.y, map.lightState(i, side, time) ?? 'red');
@@ -313,6 +425,11 @@ export class Renderer {
           occupy(pos);
           const num = isMinor(n.mainAxis, side) ? (n.minorSign === 'stop' ? '302' : '301') : '309';
           drawSign(ctx, pos.x, pos.y, num, signAngle(DIR_VEC[opposite(side)]));
+          continue;
+        }
+        if (n.control === 'roundabout' && canEnter) {
+          occupy(pos);
+          drawSign(ctx, pos.x, pos.y, '303', signAngle(DIR_VEC[opposite(side)]));
         }
       }
     }
@@ -352,6 +469,14 @@ export class Renderer {
           placeSign(at(along, dirSign), { x: -dir.x, y: -dir.y }, '306', dir);
         }
       }
+      for (const rw of map.railways()) {
+        if (rw.edge !== i) continue;
+        for (const dirSign of map.allowedDirSigns(i)) {
+          const along = rw.at - dirSign * (RAIL_HALF + 5);
+          const dir = { x: u.x * dirSign, y: u.y * dirSign };
+          placeSign(at(along, dirSign), { x: -dir.x, y: -dir.y }, '129', dir);
+        }
+      }
     }
   }
 }
@@ -363,12 +488,13 @@ function isMinor(mainAxis: 'h' | 'v' | undefined, side: Dir): boolean {
   return !main.includes(side);
 }
 
-/** Место знака/светофора подъезда: справа от полосы, чуть до стоп-линии. */
-function signPos(node: { x: number; y: number }, side: Dir, slot: number): Vec2 {
+/** Место знака/светофора подъезда: справа от полосы, чуть до стоп-линии.
+ * base — радиус зоны узла (у кольца знак отодвинут к его краю). */
+function signPos(node: { x: number; y: number }, side: Dir, slot: number, base = HALF_ROAD): Vec2 {
   const f = DIR_VEC[opposite(side)]; // направление движения к узлу
   const back = DIR_VEC[side];
   const rt = rightOf(f);
-  const dist = HALF_ROAD + 2.4 + slot * 3.2;
+  const dist = base + 2.4 + slot * 3.2;
   return {
     x: node.x + back.x * dist + rt.x * (HALF_ROAD + 1.6),
     y: node.y + back.y * dist + rt.y * (HALF_ROAD + 1.6),

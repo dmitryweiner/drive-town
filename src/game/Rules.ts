@@ -1,6 +1,6 @@
 import { obbIntersect, type OBB } from './Collision';
 import type { Vec2 } from './Car';
-import { CityMap, DIR_VEC, dirOfVec, opposite, rightOf } from './CityMap';
+import { CityMap, DIR_VEC, RAIL_HALF, STOP_LINE_OFFSET, dirOfVec, opposite, rightOf } from './CityMap';
 import type { Dir, Violation, ViolationType } from './types';
 
 /** Участник движения глазами монитора правил. */
@@ -73,6 +73,8 @@ export class RuleMonitor {
 
   private prevApproach: Approach | null = null;
   private stopTrack: { node: number; edge: number; minSpeed: number } | null = null;
+  /** Подход к ЖД-переезду: минимальная скорость в стоп-зоне и прошлый d. */
+  private railTrack = new Map<number, { minSpeed: number; prevD: number }>();
   private inNode: {
     node: number;
     entrySide: Dir | null;
@@ -146,6 +148,33 @@ export class RuleMonitor {
       this.stopTrack = null;
     }
     if (approach && approach.d > STOP_ZONE) this.stopTrack = null;
+
+    // --- ЖД-переезд: обязательная полная остановка перед стоп-линией ---
+    const railLane = this.map.nearestLane(pos);
+    this.map.railways().forEach((rw, i) => {
+      if (!railLane || railLane.edge !== rw.edge) {
+        this.railTrack.delete(i);
+        return;
+      }
+      const travel = travelDir(player);
+      const u = this.map.edgeUnit(rw.edge);
+      const dot = u.x * travel.x + u.y * travel.y;
+      if (Math.abs(dot) < 0.3) return;
+      const sign = dot > 0 ? 1 : -1;
+      const d = (rw.at - railLane.along) * sign - RAIL_HALF - STOP_LINE_OFFSET;
+      const st = this.railTrack.get(i);
+      if (d > 0 && d <= STOP_ZONE) {
+        this.railTrack.set(i, {
+          minSpeed: Math.min(st?.minSpeed ?? Infinity, Math.abs(player.speed)),
+          prevD: d,
+        });
+      } else if (d <= 0) {
+        if (st && st.prevD > 0 && moving && st.minSpeed > FULL_STOP_V) emit('railway');
+        this.railTrack.delete(i);
+      } else {
+        this.railTrack.delete(i);
+      }
+    });
 
     // --- вход/выход из квадрата перекрёстка: приоритет ---
     const nodeIn = this.nodeAt(pos);
@@ -271,8 +300,7 @@ export class RuleMonitor {
 
   private nodeAt(p: Vec2): number | null {
     for (let i = 0; i < this.map.nodes.length; i++) {
-      const b = this.map.nodeBox(i);
-      if (p.x >= b.xMin && p.x <= b.xMax && p.y >= b.yMin && p.y <= b.yMax) return i;
+      if (this.map.inNodeArea(i, p)) return i;
     }
     return null;
   }
@@ -289,6 +317,14 @@ export class RuleMonitor {
     const n = this.map.nodes[nodeId];
     if (n.control === 'lights') {
       // регулируемый: приоритет задаёт светофор (левый поворот — отдельно)
+      return null;
+    }
+    if (n.control === 'roundabout') {
+      // въезжающий уступает всем, кто уже на кольце
+      for (const v of vehicles) {
+        if (Math.abs(v.speed) < 0.8) continue;
+        if (this.map.inNodeArea(nodeId, { x: v.x, y: v.y })) return 'priority';
+      }
       return null;
     }
     let conflictSides: Dir[];
@@ -315,6 +351,8 @@ export class RuleMonitor {
   }
 
   private hasOncoming(nodeId: number, entrySide: Dir, vehicles: ActorView[]): boolean {
+    // на кольце встречных нет: приоритет решается занятостью кольца
+    if (this.map.nodes[nodeId].control === 'roundabout') return false;
     const oncomingSide = opposite(entrySide);
     const entryTravel = DIR_VEC[opposite(entrySide)];
     for (const v of vehicles) {
@@ -333,8 +371,7 @@ export class RuleMonitor {
   }
 
   private vehicleInBox(v: ActorView, nodeId: number): boolean {
-    const b = this.map.nodeBox(nodeId);
-    return v.x >= b.xMin && v.x <= b.xMax && v.y >= b.yMin && v.y <= b.yMax;
+    return this.map.inNodeArea(nodeId, { x: v.x, y: v.y });
   }
 
   private vehicleApproach(v: ActorView): Approach | null {

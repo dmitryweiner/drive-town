@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { distGain, engineFreq, engineGain, honkDuration, tickFreq, tickPeriod } from '../src/ui/Sound';
+import { distGain, engineFreq, engineGain, honkDuration, skidGain, tickFreq, tickPeriod } from '../src/ui/Sound';
 
 // Тестируем только чистые маппинги: сам граф WebAudio в vitest недоступен
 // (нет AudioContext), поэтому в нём — ноль логики (см. SOUND.md).
@@ -14,6 +14,18 @@ describe('Sound: чистые маппинги', () => {
     expect(engineGain(0)).toBeGreaterThan(0);
     expect(engineGain(9)).toBeGreaterThan(engineGain(0));
     expect(engineGain(100)).toBe(engineGain(14));
+    // мотор — фон, не должен заглушать остальное
+    expect(engineGain(14)).toBeLessThanOrEqual(0.13);
+  });
+
+  it('шорох шин: тишина при слабом заносе, растёт с боковой скоростью, с потолком', () => {
+    expect(skidGain(0)).toBe(0);
+    expect(skidGain(0.5)).toBe(0); // лёгкий дрейф в повороте не шуршит
+    expect(skidGain(-0.5)).toBe(0);
+    expect(skidGain(3)).toBeGreaterThan(0);
+    expect(skidGain(-3)).toBe(skidGain(3)); // знак заноса не важен
+    expect(skidGain(5)).toBeGreaterThan(skidGain(3));
+    expect(skidGain(50)).toBe(skidGain(7));
   });
 
   it('затухание по расстоянию: clamp01(1-d/R)²', () => {

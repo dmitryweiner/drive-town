@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { CityMap, HALF_ROAD, LANE_OFF, STOP_LINE_OFFSET } from '../src/game/CityMap';
+import {
+  CityMap,
+  HALF_ROAD,
+  LANE_OFF,
+  RAIL_HALF,
+  ROUNDABOUT_ISLAND_R,
+  ROUNDABOUT_R,
+  STOP_LINE_OFFSET,
+} from '../src/game/CityMap';
 import type { CitySpec } from '../src/game/types';
 
 /** Тестовый город:
@@ -187,6 +195,130 @@ describe('CityMap: зебры и лимиты', () => {
     const m = map();
     expect(m.speedLimitAt({ x: 60, y: 91 })).toBe(30);  // e3
     expect(m.speedLimitAt({ x: 60, y: 1 })).toBe(50);   // e0, дефолт
+  });
+});
+
+/** Крест с кольцом в центре (узел 0) и ЖД-переездом на южном ребре. */
+function ringSpec(): CitySpec {
+  return {
+    nodes: [
+      { x: 0, y: 0, control: 'roundabout' },
+      { x: 0, y: -100 },
+      { x: 100, y: 0 },
+      { x: 0, y: 100 },
+      { x: -100, y: 0 },
+    ],
+    edges: [
+      { a: 1, b: 0 },                    // e0: с севера
+      { a: 0, b: 2 },                    // e1: на восток
+      { a: 0, b: 3, railways: [50] },    // e2: на юг
+      { a: 4, b: 0 },                    // e3: с запада
+    ],
+  };
+}
+
+const ring = () => new CityMap(ringSpec());
+
+describe('CityMap: круговое движение', () => {
+  it('радиус узла: кольцо шире обычного квадрата', () => {
+    const m = ring();
+    expect(m.nodeRadius(0)).toBe(ROUNDABOUT_R);
+    expect(m.nodeRadius(1)).toBe(HALF_ROAD);
+    expect(ROUNDABOUT_R).toBeGreaterThan(HALF_ROAD);
+  });
+
+  it('стоп-линия подъезда — перед внешним краем кольца', () => {
+    const m = ring();
+    // едем по e2 с юга к узлу 0: стоп-линия на y = ROUNDABOUT_R + 1
+    const d = m.distToStopLine(0, 2, { x: LANE_OFF, y: 30 });
+    expect(d).toBeCloseTo(30 - ROUNDABOUT_R - STOP_LINE_OFFSET, 5);
+  });
+
+  it('островок — не дорога, кольцо и горловины — дорога', () => {
+    const m = ring();
+    expect(m.isOnRoad({ x: 0, y: 0 })).toBe(false);           // центр островка
+    expect(m.isOnRoad({ x: ROUNDABOUT_ISLAND_R - 0.3, y: 0 })).toBe(false);
+    expect(m.isOnRoad({ x: 4, y: 0 })).toBe(true);            // полоса кольца
+    expect(m.isOnRoad({ x: 0, y: -5.5 })).toBe(true);         // кольцо за квадратом
+    expect(m.isOnRoad({ x: 4.4, y: 4.49 })).toBe(true);       // стык горловины и кольца
+    expect(m.isOnRoad({ x: ROUNDABOUT_R + 1.7, y: ROUNDABOUT_R + 1.7 })).toBe(false);
+  });
+
+  it('в зоне узла — по кругу, а не по квадрату', () => {
+    const m = ring();
+    expect(m.inNodeArea(0, { x: 0, y: -6 })).toBe(true);   // за квадратом, но на кольце
+    expect(m.inNodeArea(0, { x: 4.45, y: 4.45 })).toBe(false); // угол квадрата вне круга
+    expect(m.inNodeArea(1, { x: 3, y: -103 })).toBe(true); // обычный узел — квадрат
+  });
+
+  const withinRing = (m: CityMap, pts: { x: number; y: number }[]): void => {
+    for (const p of pts) {
+      const d = Math.hypot(p.x, p.y);
+      // внутри кольца путь не залезает на островок
+      if (d < ROUNDABOUT_R) expect(d).toBeGreaterThan(ROUNDABOUT_ISLAND_R + 0.9);
+      expect(m.isOnRoad(p)).toBe(true);
+    }
+  };
+
+  it('прямо через кольцо: путь огибает островок по ходу движения', () => {
+    const m = ring();
+    // с юга (e2) на север (e0): въезд по полосе x=+LANE_OFF
+    const pts = m.turnPath(0, 2, 0);
+    expect(pts[0].x).toBeCloseTo(LANE_OFF, 5);
+    expect(pts[0].y).toBeGreaterThan(0);
+    const last = pts[pts.length - 1];
+    expect(last.x).toBeCloseTo(LANE_OFF, 5);
+    expect(last.y).toBeLessThan(0);
+    withinRing(m, pts);
+    // движение монотонно вперёд (без разворотов сегментов)
+    for (let i = 1; i < pts.length - 1; i++) {
+      const ux = pts[i].x - pts[i - 1].x, uy = pts[i].y - pts[i - 1].y;
+      const vx = pts[i + 1].x - pts[i].x, vy = pts[i + 1].y - pts[i].y;
+      expect(ux * vx + uy * vy).toBeGreaterThanOrEqual(0);
+    }
+  });
+
+  it('левый поворот и разворот идут по кольцу против часовой (на экране)', () => {
+    const m = ring();
+    // с юга на запад (левый): выезд по полосе y=-LANE_OFF
+    const left = m.turnPath(0, 2, 3);
+    const lastL = left[left.length - 1];
+    expect(lastL.y).toBeCloseTo(-LANE_OFF, 5);
+    expect(lastL.x).toBeLessThan(0);
+    withinRing(m, left);
+    // разворот: обратно на e2 по встречной полосе x=-LANE_OFF
+    const u = m.turnPath(0, 2, 2);
+    const lastU = u[u.length - 1];
+    expect(lastU.x).toBeCloseTo(-LANE_OFF, 5);
+    expect(lastU.y).toBeGreaterThan(0);
+    withinRing(m, u);
+  });
+
+  it('правый поворот — короткая дуга, не через всё кольцо', () => {
+    const m = ring();
+    const pts = m.turnPath(0, 2, 1); // с юга на восток
+    const last = pts[pts.length - 1];
+    expect(last.y).toBeCloseTo(LANE_OFF, 5);
+    expect(last.x).toBeGreaterThan(0);
+    withinRing(m, pts);
+    let len = 0;
+    for (let i = 1; i < pts.length; i++) len += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y);
+    expect(len).toBeLessThan(20); // а не ~30+ объезда всего кольца
+  });
+});
+
+describe('CityMap: ЖД-переезды', () => {
+  it('переезд на e2 — поперечная полоса на всю ширину дороги', () => {
+    const m = ring();
+    const rw = m.railways();
+    expect(rw).toHaveLength(1);
+    expect(rw[0].edge).toBe(2);
+    expect(rw[0].at).toBe(50);
+    expect(rw[0].axis).toBe('y'); // дорога вертикальна
+    expect(rw[0].rect).toEqual({
+      xMin: -HALF_ROAD, xMax: HALF_ROAD,
+      yMin: 50 - RAIL_HALF, yMax: 50 + RAIL_HALF,
+    });
   });
 });
 

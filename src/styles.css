@@ -9,6 +9,14 @@
 * { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; height: 100%; width: 100%; overflow: hidden; background: #1f2229; color: var(--hud-fg); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
 
+/* игра: экранные элементы не выделяются (двойной клик/drag по HUD
+   не должен подсвечивать текст) */
+body {
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
 #game { position: absolute; inset: 0; touch-action: none; cursor: grab; }
 
 #minimap {

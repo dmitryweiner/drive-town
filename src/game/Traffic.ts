@@ -3,6 +3,7 @@ import {
   CityMap,
   DIR_VEC,
   HALF_ROAD,
+  RAIL_HALF,
   STOP_LINE_OFFSET,
   CROSSWALK_LEN,
   dirOfVec,
@@ -113,21 +114,23 @@ export function clearToEnter(
   } else if (n.control === 'priority') {
     const main: Dir[] = n.mainAxis === 'h' ? ['E', 'W'] : ['N', 'S'];
     yieldSides = main.includes(side) ? [] : main;
+  } else if (n.control === 'roundabout') {
+    yieldSides = []; // кольцо: уступаем только тем, кто уже на нём (занятость)
   } else {
     // правило правой руки
     const travel = DIR_VEC[opposite(side)];
     yieldSides = [dirOfVec(rightOf(travel))];
   }
-  const leftish = turn === 'left' || turn === 'uturn';
+  // на кольце встречных нет: все едут вокруг островка в одну сторону
+  const leftish = (turn === 'left' || turn === 'uturn') && n.control !== 'roundabout';
   const oncomingSide = leftish ? opposite(side) : null;
   if (oncomingSide !== null && !yieldSides.includes(oncomingSide)) {
     yieldSides = [...yieldSides, oncomingSide];
   }
-  const box = map.nodeBox(node);
   for (const o of others) {
     if (o.id === selfId) continue;
-    // кто-то в квадрате — ждём
-    if (o.x >= box.xMin && o.x <= box.xMax && o.y >= box.yMin && o.y <= box.yMax) return false;
+    // кто-то в зоне узла (квадрат/кольцо) — ждём
+    if (map.inNodeArea(node, { x: o.x, y: o.y })) return false;
     if (yieldSides.length === 0) continue;
     if (Math.abs(o.speed) < 0.5) continue; // стоящий не помеха
     const ap = approachOf(map, o);
@@ -189,6 +192,8 @@ class NpcVehicle {
   private plan: TurnPlan | null = null;
   private turnS = 0;
   private stopDone = false;
+  /** Индекс ЖД-переезда, перед которым остановка уже выполнена. */
+  private railDone: number | null = null;
   private reservedNode: number | null = null;
   /** Сколько секунд стоим с бронью, не двигаясь (страховка от гридлока). */
   private reservedIdle = 0;
@@ -320,7 +325,9 @@ class NpcVehicle {
       this.mode = 'edge';
       return;
     }
-    const vmax = plan.turn !== 'straight' ? TURN_SPEED : this.freeSpeed();
+    // на кольце даже «прямо» — дуга вокруг островка
+    const ringNode = this.map.nodes[plan.node].control === 'roundabout';
+    const vmax = plan.turn !== 'straight' || ringNode ? TURN_SPEED : this.freeSpeed();
     const target = Math.min(vmax, this.followSpeed(others, vmax, plan));
     this.speed = Math.min(target, this.speed + NPC_ACCEL * dt);
     this.turnS += this.speed * dt;
@@ -336,6 +343,7 @@ class NpcVehicle {
       this.mode = 'edge';
       this.plan = null;
       this.stopDone = false;
+      this.railDone = null;
       this.syncPose();
       return;
     }
@@ -344,11 +352,13 @@ class NpcVehicle {
 
   private stepEdge(dt: number, time: number, others: ActorView[], peds: PedView[], arbiter: NodeArbiter, rng: Rng): void {
     const len = this.map.edgeLen(this.edge);
-    const boundary = this.dirSign > 0 ? len - HALF_ROAD : HALF_ROAD;
-    const dBox = (boundary - this.along) * this.dirSign;
-    const dStopLine = dBox - STOP_LINE_OFFSET;
     const e = this.map.edges[this.edge];
     const node = this.dirSign > 0 ? e.b : e.a;
+    // у кольца зона узла шире квадрата — стоп-линия перед внешним краем
+    const r = this.map.nodeRadius(node);
+    const boundary = this.dirSign > 0 ? len - r : r;
+    const dBox = (boundary - this.along) * this.dirSign;
+    const dStopLine = dBox - STOP_LINE_OFFSET;
 
     if ((this.plan === null || this.plan.node !== node) && dBox < 30) {
       this.plan = this.makePlan(node, rng);
@@ -385,6 +395,8 @@ class NpcVehicle {
     }
     const cwStop = this.crosswalkStop(peds);
     if (cwStop !== null) candidates.push(cwStop);
+    const railStop = this.railwayStop();
+    if (railStop !== null) candidates.push(railStop);
 
     const vmax = this.freeSpeed();
     let target = Math.min(vmax, this.followSpeed(others, vmax));
@@ -413,8 +425,7 @@ class NpcVehicle {
   }
 
   private inBoxOf(nodeId: number): boolean {
-    const b = this.map.nodeBox(nodeId);
-    return this.pos.x >= b.xMin && this.pos.x <= b.xMax && this.pos.y >= b.yMin && this.pos.y <= b.yMax;
+    return this.map.inNodeArea(nodeId, this.pos);
   }
 
   /** Есть ли кто-то попутный между мной и стоп-линией. */
@@ -468,6 +479,29 @@ class NpcVehicle {
       best = Math.min(best, Math.hypot(o.x - (a.x + abx * t), o.y - (a.y + aby * t)));
     }
     return best;
+  }
+
+  /** Остановка перед ЖД-переездом: обязательная полная, затем проезд. */
+  private railwayStop(): number | null {
+    let best: { i: number; d: number } | null = null;
+    this.map.railways().forEach((rw, i) => {
+      if (rw.edge !== this.edge) return;
+      // d — от центра машины до стоп-линии (за 1 м до полотна рельсов)
+      const d = (rw.at - this.along) * this.dirSign - RAIL_HALF - STOP_LINE_OFFSET;
+      if (d < -1) return; // уже на переезде/за ним
+      if (!best || d < best.d) best = { i, d };
+    });
+    if (!best) {
+      this.railDone = null;
+      return null;
+    }
+    const { i, d } = best;
+    if (this.railDone === i) return null;
+    if (d < 3 && Math.abs(this.speed) < 0.08) {
+      this.railDone = i;
+      return null;
+    }
+    return d - this.size.length / 2;
   }
 
   /** Остановка перед зеброй, если на ней пешеход. */

@@ -18,9 +18,18 @@ export function engineFreq(speed: number): number {
   return 55 + 14 * Math.abs(speed);
 }
 
-/** Громкость мотора: слышен на холостых, чуть растёт со скоростью. */
+/** Громкость мотора: слышен на холостых, чуть растёт со скоростью.
+ * Тихий фон — не должен заглушать светофор/клаксоны/удары. */
 export function engineGain(speed: number): number {
-  return 0.05 + 0.012 * Math.min(Math.abs(speed), 14);
+  return 0.025 + 0.007 * Math.min(Math.abs(speed), 14);
+}
+
+/** Шорох шин при заносе ручника: от боковой скорости кузова (lateralV).
+ * Порог отсекает лёгкий дрейф в обычном повороте. */
+export function skidGain(lateralV: number): number {
+  const a = Math.min(Math.abs(lateralV), 7);
+  if (a < 1) return 0;
+  return 0.3 * ((a - 1) / 6);
 }
 
 /** Затухание по расстоянию от машины игрока: clamp01(1 - d/R)². */
@@ -51,6 +60,7 @@ export class Sound {
   private master: GainNode | null = null;
   private engineGainNode: GainNode | null = null;
   private engineOscs: OscillatorNode[] = [];
+  private skidGainNode: GainNode | null = null;
   private noise: AudioBuffer | null = null;
   private muted: boolean;
   private tickIn = 0;
@@ -90,15 +100,31 @@ export class Sound {
     saw.start();
     tri.start();
 
-    // буфер белого шума для «бух» удара
+    // буфер белого шума: «бух» удара и (зацикленно) шорох шин
     const noise = ctx.createBuffer(1, Math.ceil(ctx.sampleRate * 0.15), ctx.sampleRate);
     const data = noise.getChannelData(0);
     for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+
+    // шорох шин при заносе ручника: шум → bandpass → gain, крутится всегда
+    const skidSrc = ctx.createBufferSource();
+    skidSrc.buffer = noise;
+    skidSrc.loop = true;
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.frequency.value = 1200;
+    bp.Q.value = 0.7;
+    const skid = ctx.createGain();
+    skid.gain.value = 0;
+    skidSrc.connect(bp);
+    bp.connect(skid);
+    skid.connect(master);
+    skidSrc.start();
 
     this.ctx = ctx;
     this.master = master;
     this.engineGainNode = gain;
     this.engineOscs = [saw, tri];
+    this.skidGainNode = skid;
     this.noise = noise;
   }
 
@@ -139,6 +165,10 @@ export class Sound {
     const v = round.finished ? 0 : Math.abs(car.velocity);
     for (const osc of this.engineOscs) osc.frequency.setTargetAtTime(engineFreq(v), now, 0.05);
     this.engineGainNode?.gain.setTargetAtTime(round.finished ? 0 : engineGain(v), now, 0.08);
+
+    // занос ручника: громкость от боковой скорости кузова
+    const skid = round.finished ? 0 : skidGain(round.car.lateralV);
+    this.skidGainNode?.gain.setTargetAtTime(skid, now, 0.04);
 
     // тики ближайшего светофора — фаза подъезда игрока; в квадрате или
     // спиной к узлу approachOf смотрит уже на следующий узел → тишина

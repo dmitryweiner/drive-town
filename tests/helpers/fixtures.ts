@@ -9,6 +9,8 @@ export function cross(opts: {
   minorSign?: 'stop' | 'yield';
   oneWayE?: boolean;
   crosswalkS?: boolean;
+  /** ЖД-переезд на южном луче (e2) в 50 м от центра. */
+  railwayS?: boolean;
 } = {}): CityMap {
   const spec: CitySpec = {
     nodes: [
@@ -27,7 +29,7 @@ export function cross(opts: {
     edges: [
       { a: 1, b: 0 },
       { a: 0, b: 2, oneWay: opts.oneWayE ? true : undefined },
-      { a: 0, b: 3, crosswalks: opts.crosswalkS ? [50] : undefined },
+      { a: 0, b: 3, crosswalks: opts.crosswalkS ? [50] : undefined, railways: opts.railwayS ? [50] : undefined },
       { a: 4, b: 0 },
     ],
   };

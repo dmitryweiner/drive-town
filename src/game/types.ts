@@ -9,8 +9,9 @@ export type LightState = 'red' | 'red-yellow' | 'green' | 'yellow';
 /** Регулирование перекрёстка:
  * none — нерегулируемый (правило правой руки),
  * lights — светофор,
- * priority — главная дорога вдоль оси mainAxis, на второстепенных minorSign. */
-export type NodeControl = 'none' | 'lights' | 'priority';
+ * priority — главная дорога вдоль оси mainAxis, на второстепенных minorSign,
+ * roundabout — круговое движение (въезжающий уступает кольцу). */
+export type NodeControl = 'none' | 'lights' | 'priority' | 'roundabout';
 
 export type MinorSign = 'stop' | 'yield';
 
@@ -36,6 +37,9 @@ export interface EdgeSpec {
   speedLimit?: number;
   /** Пешеходные переходы: метры от ЦЕНТРА узла a вдоль ребра. */
   crosswalks?: number[];
+  /** ЖД-переезды: метры от ЦЕНТРА узла a вдоль ребра.
+   * Перед переездом обязательна полная остановка (как в driving-trainer). */
+  railways?: number[];
 }
 
 export interface Rect {
@@ -58,6 +62,7 @@ export type ViolationType =
   | 'off-road'    // выезд за пределы проезжей части
   | 'priority'    // не уступил дорогу
   | 'ran-stop'    // не остановился перед знаком «стоп»
+  | 'railway'     // проехал ЖД-переезд без остановки
   | 'ran-light'   // проехал на запрещающий сигнал
   | 'wrong-way'   // движение по встречной / против односторонней
   | 'reverse'     // движение задним ходом
@@ -77,6 +82,7 @@ export const VIOLATION_LABEL: Record<ViolationType, string> = {
   'off-road': 'Выезд с дороги',
   'priority': 'Не уступил дорогу',
   'ran-stop': 'Проезд знака «стоп» без остановки',
+  'railway': 'Проезд ЖД-переезда без остановки',
   'ran-light': 'Проезд на запрещающий сигнал',
   'wrong-way': 'Выезд на встречную полосу',
   'reverse': 'Движение задним ходом',
