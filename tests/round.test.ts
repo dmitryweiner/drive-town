@@ -87,6 +87,27 @@ describe('Round: игровой цикл', () => {
     expect(r.finished).toBe(false);
   });
 
+  it('удар в дом на скорости с рулём не запирает машину в доме', () => {
+    const spec: CitySpec = {
+      nodes: [{ x: 0, y: 0 }, { x: 200, y: 0 }],
+      edges: [{ a: 0, b: 1 }],
+      buildings: [{ xMin: 60, xMax: 80, yMin: -5, yMax: 5 }],
+    };
+    const map = new CityMap(spec);
+    const r = new Round(plan(map, { x: 30, y: 2.25, heading: 0 }, { x: 190, y: 2.25 }), { trafficCount: 0 });
+    // разгон в стену, руль — перед самым ударом: кузов вращается в момент
+    // контакта, углом
+    for (let i = 0; i < 240 && r.car.position.x < 56; i++) {
+      r.step(DT, { throttle: 1, brake: 0, steer: 0 });
+    }
+    for (let i = 0; i < 60; i++) r.step(DT, { throttle: 1, brake: 0, steer: -1 });
+    expect(r.violations.map((v) => v.type)).toContain('collision');
+    // задним ходом можно уехать от дома
+    const x0 = r.car.position.x;
+    for (let i = 0; i < 240; i++) r.step(DT, { throttle: 0, brake: 1, steer: 0 });
+    expect(r.car.position.x).toBeLessThan(x0 - 1);
+  });
+
   it('раунд с трафиком детерминирован по seed', () => {
     const run = (): string => {
       const map = cross();

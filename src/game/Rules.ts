@@ -30,6 +30,8 @@ export interface PedView {
 const SPEED_TOL = 0.8;
 const SPEEDING_DELAY = 0.5;
 const WRONG_WAY_DELAY = 0.7;
+/** Короткий манёвр назад (подравняться) прощается. */
+const REVERSE_DELAY = 0.7;
 const OFF_ROAD_DELAY = 0.4;
 /** Зона обязательной остановки перед знаком «стоп», м до линии. */
 const STOP_ZONE = 10;
@@ -83,6 +85,8 @@ export class RuleMonitor {
   private speedingLatched = false;
   private wrongWayAcc = 0;
   private wrongWayLatched = false;
+  private reverseAcc = 0;
+  private reverseLatched = false;
   private offRoadAcc = 0;
   private offRoadLatched = false;
   private pedPrevIn = new Map<number, boolean>();
@@ -187,6 +191,18 @@ export class RuleMonitor {
     } else if (Math.abs(player.speed) <= limit) {
       this.speedingAcc = 0;
       this.speedingLatched = false;
+    }
+
+    // --- задний ход (едущий назад не считается «встречкой») ---
+    if (player.speed < -1) {
+      this.reverseAcc += dt;
+      if (this.reverseAcc >= REVERSE_DELAY && !this.reverseLatched) {
+        this.reverseLatched = true;
+        emit('reverse');
+      }
+    } else if (player.speed >= 0) {
+      this.reverseAcc = 0;
+      this.reverseLatched = false;
     }
 
     // --- встречка / односторонка ---
@@ -326,6 +342,7 @@ export class RuleMonitor {
   }
 
   private isWrongWay(player: ActorView): boolean {
+    if (player.speed < 0) return false; // задний ход — отдельное нарушение
     if (Math.abs(player.speed) < 1) return false;
     const pos = { x: player.x, y: player.y };
     if (this.nodeAt(pos) !== null) return false;

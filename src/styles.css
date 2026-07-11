@@ -131,10 +131,25 @@ body.is-mobile #mobile-controls { display: block; }
 #btn-reverse { background: rgba(255, 122, 122, 0.28); }
 #mobile-controls button:active { transform: scale(0.94); background: rgba(255,255,255,0.25); }
 
-/* на телефоне миникарта меньше и над кнопками руля */
+/* на телефоне миникарта меньше */
 @media (max-width: 500px) {
   .hud-pill { font-size: 14px; padding: 0 10px; }
-  #minimap { width: 130px; height: 130px; bottom: 130px; }
+  #minimap { width: 130px; height: 130px; }
+}
+
+/* в мобильном режиме миникарта по центру правого края:
+   внизу она мешалась кнопкам газа/тормоза */
+body.is-mobile #minimap {
+  top: 50%;
+  bottom: auto;
+  transform: translateY(-50%);
+}
+@media (hover: none) and (pointer: coarse) {
+  #minimap {
+    top: 50%;
+    bottom: auto;
+    transform: translateY(-50%);
+  }
 }
 
 #result-overlay {

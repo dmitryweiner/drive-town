@@ -277,7 +277,7 @@ export class Renderer {
     const occupy = (p: Vec2): void => {
       placed.push(p);
     };
-    const placeSign = (pos: Vec2, away: Vec2, num: string): void => {
+    const placeSign = (pos: Vec2, away: Vec2, num: string, travel: Vec2): void => {
       const p = { ...pos };
       let guard = 0;
       while (placed.some((q) => Math.hypot(q.x - p.x, q.y - p.y) < 3.4) && guard++ < 4) {
@@ -285,7 +285,7 @@ export class Renderer {
         p.y += away.y * 3.4;
       }
       occupy(p);
-      drawSign(ctx, p.x, p.y, num);
+      drawSign(ctx, p.x, p.y, num, signAngle(travel));
     };
 
     for (let i = 0; i < map.nodes.length; i++) {
@@ -302,7 +302,8 @@ export class Renderer {
         }
         if (n.control === 'priority' && canEnter) {
           occupy(pos);
-          drawSign(ctx, pos.x, pos.y, isMinor(n.mainAxis, side) ? (n.minorSign === 'stop' ? '302' : '301') : '309');
+          const num = isMinor(n.mainAxis, side) ? (n.minorSign === 'stop' ? '302' : '301') : '309';
+          drawSign(ctx, pos.x, pos.y, num, signAngle(DIR_VEC[opposite(side)]));
         }
       }
     }
@@ -323,22 +324,23 @@ export class Renderer {
         // «одностороннее движение» — в начале, «въезд запрещён» — лицом
         // к нарушителю с конца b; оба подальше от перекрёстков, чтобы
         // не закрывать светофоры соседних подъездов
-        placeSign(at(HALF_ROAD + 8, 1), u, '618');
-        placeSign(at(len - HALF_ROAD - 8, -1), { x: -u.x, y: -u.y }, '402');
+        placeSign(at(HALF_ROAD + 8, 1), u, '618', u);
+        const back = { x: -u.x, y: -u.y };
+        placeSign(at(len - HALF_ROAD - 8, -1), back, '402', back);
       }
       if (e.speedLimit !== undefined) {
         for (const dirSign of map.allowedDirSigns(i)) {
           const along = dirSign > 0 ? HALF_ROAD + 4.5 : len - HALF_ROAD - 4.5;
           const dir = { x: u.x * dirSign, y: u.y * dirSign };
-          placeSign(at(along, dirSign), dir, `426-${e.speedLimit}`);
+          placeSign(at(along, dirSign), dir, `426-${e.speedLimit}`, dir);
         }
       }
       for (const cw of map.crosswalks()) {
         if (cw.edge !== i) continue;
         for (const dirSign of map.allowedDirSigns(i)) {
           const along = cw.at - dirSign * (CROSSWALK_LEN / 2 + 4);
-          const back = { x: -u.x * dirSign, y: -u.y * dirSign };
-          placeSign(at(along, dirSign), back, '306');
+          const dir = { x: u.x * dirSign, y: u.y * dirSign };
+          placeSign(at(along, dirSign), { x: -dir.x, y: -dir.y }, '306', dir);
         }
       }
     }
@@ -438,10 +440,19 @@ function signImage(num: string): HTMLImageElement {
 const SIGN_H = 3.0;
 const SIGN_W = SIGN_H * (78 / 63);
 
-function drawSign(ctx: CanvasRenderingContext2D, x: number, y: number, num: string): void {
+/** Поворот знака: «верх» картинки — по ходу движения подъезда. */
+function signAngle(travel: Vec2): number {
+  return Math.atan2(travel.y, travel.x) + Math.PI / 2;
+}
+
+function drawSign(ctx: CanvasRenderingContext2D, x: number, y: number, num: string, angle = 0): void {
   const img = signImage(num);
   if (!img.complete || img.naturalWidth === 0) return; // появится на следующем кадре
-  ctx.drawImage(img, x - SIGN_W / 2, y - SIGN_H / 2, SIGN_W, SIGN_H);
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(angle);
+  ctx.drawImage(img, -SIGN_W / 2, -SIGN_H / 2, SIGN_W, SIGN_H);
+  ctx.restore();
 }
 
 function drawNpcVehicle(

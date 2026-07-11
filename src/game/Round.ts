@@ -58,7 +58,7 @@ export class Round {
   step(dt: number, input: CarInput): Violation[] {
     if (this.finished) return [];
     this.time += dt;
-    const prev = { x: this.car.position.x, y: this.car.position.y };
+    const prev = { x: this.car.position.x, y: this.car.position.y, heading: this.car.heading };
     this.car.update(dt, input);
 
     const view: ActorView = {
@@ -74,11 +74,15 @@ export class Round {
     const fresh = this.rules.update(dt, this.time, view, this.traffic.vehicleViews(), this.traffic.pedViews());
     this.violations.push(...fresh);
 
-    // дома и NPC — твёрдые: откат позиции и сброс скорости
+    // дома и NPC — твёрдые: откат ВСЕЙ позы (не только позиции: при ударе
+    // углом повёрнутый кузов в старой точке уже пересекает препятствие,
+    // и машина запирается в вечном откате) и сброс скоростей
     if (this.hitsSolid()) {
       this.car.position.x = prev.x;
       this.car.position.y = prev.y;
+      this.car.heading = prev.heading;
       this.car.velocity = 0;
+      this.car.lateralV = 0;
     }
 
     if (this.goalDist < GOAL_RADIUS) {

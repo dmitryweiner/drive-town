@@ -206,6 +206,30 @@ describe('Rules: приоритет', () => {
   });
 });
 
+describe('Rules: задний ход', () => {
+  it('задний ход — отдельное нарушение, а не «встречная»', () => {
+    const mon = new RuleMonitor(cross());
+    // катимся назад по СВОЕЙ полосе: нос на север, машина едет на юг
+    const steps: { x: number; y: number; heading: number; speed: number }[] = [];
+    for (let y = 20; y <= 40; y += 3 * 0.05) {
+      steps.push({ x: 2.25, y, heading: N, speed: -3 });
+    }
+    const vs = drive(mon, steps);
+    expect(vs).toContain('reverse');
+    expect(vs.filter((v) => v === 'reverse')).toHaveLength(1);
+    expect(vs).not.toContain('wrong-way');
+  });
+
+  it('короткий манёвр назад прощается', () => {
+    const mon = new RuleMonitor(cross());
+    const steps: { x: number; y: number; heading: number; speed: number }[] = [];
+    for (let y = 20; y <= 21; y += 2 * 0.05) {
+      steps.push({ x: 2.25, y, heading: N, speed: -2 });
+    }
+    expect(drive(mon, steps)).not.toContain('reverse');
+  });
+});
+
 describe('Rules: встречка и односторонка', () => {
   it('езда по встречной полосе — нарушение', () => {
     const mon = new RuleMonitor(cross());
