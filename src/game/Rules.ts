@@ -1,6 +1,16 @@
 import { obbIntersect, type OBB } from './Collision';
 import type { Vec2 } from './Car';
-import { CityMap, DIR_VEC, RAIL_HALF, STOP_LINE_OFFSET, dirOfVec, opposite, rightOf } from './CityMap';
+import {
+  CityMap,
+  DIR_VEC,
+  RAIL_HALF,
+  ROUNDABOUT_ISLAND_R,
+  ROUNDABOUT_R,
+  STOP_LINE_OFFSET,
+  dirOfVec,
+  opposite,
+  rightOf,
+} from './CityMap';
 import type { Dir, Violation, ViolationType } from './types';
 
 /** Участник движения глазами монитора правил. */
@@ -214,7 +224,7 @@ export class RuleMonitor {
             : null;
       this.inNode = { node: nodeIn, entrySide, committed: false, oncomingSeen: false };
       if (entrySide !== null && moving) {
-        const type = this.entryConflict(nodeIn, entrySide, vehicles);
+        const type = this.entryConflict(nodeIn, entrySide, player, vehicles);
         if (type) emit(type);
       }
     }
@@ -330,7 +340,12 @@ export class RuleMonitor {
   }
 
   /** Нарушение приоритета при въезде в перекрёсток. */
-  private entryConflict(nodeId: number, entrySide: Dir, vehicles: ActorView[]): ViolationType | null {
+  private entryConflict(
+    nodeId: number,
+    entrySide: Dir,
+    player: ActorView,
+    vehicles: ActorView[],
+  ): ViolationType | null {
     const n = this.map.nodes[nodeId];
     if (n.control === 'lights') {
       // регулируемый: приоритет задаёт светофор (левый поворот — отдельно)
@@ -354,7 +369,13 @@ export class RuleMonitor {
     }
     for (const v of vehicles) {
       if (Math.abs(v.speed) < 0.8) continue;
-      if (this.vehicleInBox(v, nodeId)) return 'priority';
+      // машина уже в квадрате: помеха, только если траектории сближаются —
+      // одновременный въезд с непересекающимися путями легален (ПДД:
+      // «уступить» = не вынуждать менять скорость/направление)
+      if (this.vehicleInBox(v, nodeId)) {
+        if (raysConverge(player, v)) return 'priority';
+        continue;
+      }
       const ap = this.vehicleApproach(v);
       if (!ap || ap.node !== nodeId) continue;
       // помеха и по расстоянию, и по времени прибытия: только что
@@ -399,7 +420,20 @@ export class RuleMonitor {
     if (player.speed < 0) return false; // задний ход — отдельное нарушение
     if (Math.abs(player.speed) < 1) return false;
     const pos = { x: player.x, y: player.y };
-    if (this.nodeAt(pos) !== null) return false;
+    const nodeId = this.nodeAt(pos);
+    if (nodeId !== null) {
+      // на кольце поток идёт против часовой (на экране): движение по часовой
+      // — «встречка». Горловины и кромки не судим (там въезд/выезд).
+      const n = this.map.nodes[nodeId];
+      if (n.control !== 'roundabout') return false;
+      const rx = pos.x - n.x;
+      const ry = pos.y - n.y;
+      const d = Math.hypot(rx, ry);
+      if (d < ROUNDABOUT_ISLAND_R + 0.5 || d > ROUNDABOUT_R - 0.5) return false;
+      const t = travelDir(player);
+      // r × t > 0 — угол atan2 растёт, то есть едем по часовой (против потока)
+      return (rx * t.y - ry * t.x) / d > 0.35;
+    }
     const lane = this.map.nearestLane(pos);
     if (!lane) return false;
     const len = this.map.edgeLen(lane.edge);
@@ -420,6 +454,27 @@ export class RuleMonitor {
 function travelDir(v: ActorView): Vec2 {
   const h = v.speed >= 0 ? v.heading : v.heading + Math.PI;
   return { x: Math.cos(h), y: Math.sin(h) };
+}
+
+/** Сближаются ли пути двух машин (лучи по текущим курсам, ближайшие ~15 м)
+ * меньше чем на 2.8 м. Курс поворачивающего в дуге — приближение. */
+function raysConverge(a: ActorView, b: ActorView): boolean {
+  const ta = travelDir(a);
+  const tb = travelDir(b);
+  // попутный впереди — вопрос дистанции, а не уступания
+  if (ta.x * tb.x + ta.y * tb.y > 0.7) {
+    if ((b.x - a.x) * ta.x + (b.y - a.y) * ta.y > 0) return false;
+  }
+  for (let i = 0; i <= 10; i++) {
+    const ax = a.x + ta.x * 1.5 * i;
+    const ay = a.y + ta.y * 1.5 * i;
+    for (let j = 0; j <= 10; j++) {
+      const bx = b.x + tb.x * 1.5 * j;
+      const by = b.y + tb.y * 1.5 * j;
+      if (Math.hypot(ax - bx, ay - by) < 2.8) return true;
+    }
+  }
+  return false;
 }
 
 function viewOBB(v: ActorView): OBB {

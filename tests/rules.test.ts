@@ -225,6 +225,37 @@ describe('Rules: круговое движение', () => {
     expect(vs).toHaveLength(0);
   });
 
+  it('движение по кольцу по часовой (против потока) — «встречка»', () => {
+    const map = cross({ control: 'roundabout' });
+    const mon = new RuleMonitor(map);
+    // круг по осевой кольца ПО часовой стрелке на экране (angle растёт)
+    const steps: { x: number; y: number; heading: number; speed: number }[] = [];
+    for (let a = Math.PI / 2; a < Math.PI * 2.2; a += 0.04) {
+      steps.push({
+        x: 6.75 * Math.cos(a),
+        y: 6.75 * Math.sin(a),
+        heading: a + Math.PI / 2, // касательная в сторону роста угла
+        speed: 4,
+      });
+    }
+    expect(drive(mon, steps)).toContain('wrong-way');
+  });
+
+  it('движение по кольцу против часовой — чисто', () => {
+    const map = cross({ control: 'roundabout' });
+    const mon = new RuleMonitor(map);
+    const steps: { x: number; y: number; heading: number; speed: number }[] = [];
+    for (let a = Math.PI / 2; a > -Math.PI * 1.7; a -= 0.04) {
+      steps.push({
+        x: 6.75 * Math.cos(a),
+        y: 6.75 * Math.sin(a),
+        heading: a - Math.PI / 2, // касательная в сторону убывания угла
+        speed: 4,
+      });
+    }
+    expect(drive(mon, steps)).not.toContain('wrong-way');
+  });
+
   it('на кольце нет правила «левый под встречного»', () => {
     const map = cross({ control: 'roundabout' });
     const mon = new RuleMonitor(map);
@@ -264,6 +295,34 @@ describe('Rules: приоритет', () => {
     const npc = actor(12.5, -2.25, W, 7, 1);
     const vs = drive(mon, northRun(20, -2, 6), { vehicles: [npc] });
     expect(vs).toContain('priority');
+  });
+
+  it('одновременный въезд с непересекающимися траекториями легален', () => {
+    const map = cross({ control: 'priority', mainAxis: 'h', minorSign: 'yield' });
+    const mon = new RuleMonitor(map);
+    // машина уже в квадрате, уходит направо на запад по своей полосе —
+    // наш путь прямо на север её не пересекает (кейс с двух второстепенных)
+    const leaving = actor(-2, -1.5, W, 4, 1);
+    const vs = drive(mon, northRun(20, -8, 5), { vehicles: [leaving] });
+    expect(vs).not.toContain('priority');
+  });
+
+  it('машина в квадрате поперёк нашего пути — «не уступил»', () => {
+    const map = cross({ control: 'priority', mainAxis: 'h', minorSign: 'yield' });
+    const mon = new RuleMonitor(map);
+    // пересекает квадрат на восток по нашей стороне — траектории сходятся
+    const crossing = actor(-3, 2.25, E, 5, 1);
+    const vs = drive(mon, northRun(20, -8, 5), { vehicles: [crossing] });
+    expect(vs).toContain('priority');
+  });
+
+  it('попутный лидер в квадрате впереди — не «не уступил»', () => {
+    const map = cross({ control: 'none' });
+    const mon = new RuleMonitor(map);
+    // едет прямо перед нами через перекрёсток в ту же сторону
+    const leader = actor(2.25, -2, N, 5, 1);
+    const vs = drive(mon, northRun(9, -8, 5), { vehicles: [leader] });
+    expect(vs).not.toContain('priority');
   });
 
   it('пустая главная — проезд чистый', () => {
