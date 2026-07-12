@@ -9,6 +9,7 @@ export class Hud {
   private readonly violationsEl = byValue('violations');
   private readonly distEl = byValue('dist');
   private readonly scoreEl = byValue('score');
+  private readonly seedEl = byValue('seed');
   private readonly toastEl = document.getElementById('toast');
   private readonly overlayEl = document.getElementById('result-overlay');
 
@@ -38,6 +39,7 @@ export class Hud {
       setText(this.distEl, String(dist));
     }
     setText(this.scoreEl, String(totalScore));
+    setText(this.seedEl, String(round.plan.seed));
 
     if (round.finished && !this.overlayShown) {
       this.overlayShown = true;

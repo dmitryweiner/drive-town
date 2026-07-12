@@ -128,6 +128,22 @@ body {
 }
 #toast[hidden] { display: none; }
 
+/* seed текущего города — для воспроизводимых багрепортов (?seed=…);
+   текст можно выделить и скопировать, несмотря на глобальный запрет */
+#seed-tag {
+  position: absolute;
+  bottom: 4px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 11px;
+  color: rgba(245, 245, 245, 0.45);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+  font-variant-numeric: tabular-nums;
+  user-select: text;
+  -webkit-user-select: text;
+  cursor: text;
+}
+
 #mobile-controls { display: none; }
 @media (hover: none) and (pointer: coarse) {
   #mobile-controls { display: block; }
