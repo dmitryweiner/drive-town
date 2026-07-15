@@ -11,6 +11,7 @@ import {
   STOP_LINE_OFFSET,
 } from '../src/game/CityMap';
 import type { CitySpec } from '../src/game/types';
+import { cross } from './helpers/fixtures';
 
 /** Тестовый город:
  *
@@ -157,6 +158,30 @@ describe('CityMap: стоп-линии и повороты', () => {
       const vx = pts[i + 1].x - pts[i].x, vy = pts[i + 1].y - pts[i].y;
       expect(ux * vx + uy * vy).toBeGreaterThanOrEqual(0);
     }
+  });
+
+  // ПДД Израиля: тк. 42 — правый поворот в правую полосу; тк. 43 — левый
+  // на односторонку (две полосы одного направления) — в ЛЕВУЮ полосу
+  it('левый поворот на односторонку кончается в левой полосе', () => {
+    const m = cross({ oneWayE: true });
+    // с севера (e0, курс на юг) налево на восток (e1)
+    const pts = m.turnPath(0, 0, 1);
+    const last = pts[pts.length - 1];
+    expect(last.y).toBeCloseTo(-LANE_OFF, 5);
+    for (const p of pts) expect(m.isOnRoad(p), `точка вне дороги: ${p.x},${p.y}`).toBe(true);
+  });
+
+  it('правый поворот на односторонку — в правой полосе', () => {
+    const m = cross({ oneWayE: true });
+    // с юга (e2, курс на север) направо на восток
+    const pts = m.turnPath(0, 2, 1);
+    expect(pts[pts.length - 1].y).toBeCloseTo(LANE_OFF, 5);
+  });
+
+  it('левый поворот на двустороннюю — в полосе своего направления', () => {
+    const m = cross();
+    const pts = m.turnPath(0, 0, 1);
+    expect(pts[pts.length - 1].y).toBeCloseTo(LANE_OFF, 5);
   });
 });
 

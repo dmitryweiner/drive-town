@@ -92,6 +92,9 @@ export class RuleMonitor {
     committed: boolean;
     oncomingSeen: boolean;
   } | null = null;
+  /** Проверка полосы после поворота на односторонку (тк. 42/43 Израиля):
+   * want — знак lateral нужной полосы (1 — правая, -1 — левая). */
+  private laneCheck: { node: number; edge: number; want: number } | null = null;
 
   private speedingAcc = 0;
   private speedingLatched = false;
@@ -213,9 +216,30 @@ export class RuleMonitor {
       if (st.entrySide !== null && exitSide === st.entrySide && n.noUTurn && player.speed > 0.3) {
         emit('no-u-turn');
       }
+      // поворот на односторонку (две полосы одного направления) должен
+      // завершиться в «своей» полосе: правый — в правой (тк. 42), левый —
+      // в левой (тк. 43). Кольцо не судим: ringPath выводит направо.
+      if (
+        st.entrySide !== null &&
+        exitSide !== st.entrySide &&
+        exitSide !== opposite(st.entrySide) &&
+        n.control !== 'roundabout'
+      ) {
+        const outEdge = this.map.nodeEdges(st.node)[exitSide];
+        if (outEdge !== undefined) {
+          const e = this.map.edges[outEdge];
+          if (e.oneWay && e.a === st.node) {
+            const f = DIR_VEC[opposite(st.entrySide)];
+            const o = DIR_VEC[exitSide];
+            const right = f.x * o.y - f.y * o.x > 0;
+            this.laneCheck = { node: st.node, edge: outEdge, want: right ? 1 : -1 };
+          }
+        }
+      }
       this.inNode = null;
     }
     if (nodeIn !== null && this.inNode === null) {
+      this.laneCheck = null; // въехал в следующий узел — прежняя проверка неактуальна
       const entrySide =
         this.prevApproach && this.prevApproach.node === nodeIn
           ? this.prevApproach.side
@@ -234,6 +258,23 @@ export class RuleMonitor {
       // когда поворот уже идёт, уступает сам (ср. прощение жёлтого)
       this.inNode.oncomingSeen = this.hasOncoming(this.inNode.node, this.inNode.entrySide, vehicles);
       if (moving) this.inNode.committed = true;
+    }
+
+    // --- полоса после поворота на односторонку: судим, когда игрок
+    // отъехал от узла и определился с полосой ---
+    if (this.laneCheck && nodeIn === null) {
+      const lc = this.laneCheck;
+      const lane = this.map.nearestLane(pos);
+      if (lane && lane.edge === lc.edge) {
+        const distFromNode = lane.along; // ребро выезда начинается в узле (e.a === node)
+        const settled = Math.abs(lane.lateral) > 0.8 || distFromNode > this.map.nodeRadius(lc.node) + 8;
+        if (distFromNode > this.map.nodeRadius(lc.node) + 2 && settled) {
+          if ((lane.lateral >= 0 ? 1 : -1) !== lc.want) emit('turn-lane');
+          this.laneCheck = null;
+        }
+      } else if (lane) {
+        this.laneCheck = null; // ушёл на другое ребро — не судим
+      }
     }
 
     // --- скорость ---

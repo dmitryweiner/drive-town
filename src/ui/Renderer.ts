@@ -405,12 +405,7 @@ export class Renderer {
       placed.push(p);
     };
     const placeSign = (pos: Vec2, away: Vec2, num: string, travel: Vec2): void => {
-      const p = { ...pos };
-      let guard = 0;
-      while (placed.some((q) => Math.hypot(q.x - p.x, q.y - p.y) < 3.4) && guard++ < 4) {
-        p.x += away.x * 3.4;
-        p.y += away.y * 3.4;
-      }
+      const p = signSpot(map, pos, away, placed);
       occupy(p);
       drawSign(ctx, p.x, p.y, num, signAngle(travel));
     };
@@ -494,6 +489,21 @@ export class Renderer {
 }
 
 const SIDES: readonly Dir[] = ['N', 'E', 'S', 'W'];
+
+/** Место для знака: pos или сдвиги по 3.4 м вдоль away от занятых мест,
+ * но НИКОГДА на полотно или в зону перекрёстка (анти-оверлап выталкивал
+ * знак зебры на угол узла) — при упоре пробуем обратную сторону. */
+export function signSpot(map: CityMap, pos: Vec2, away: Vec2, placed: Vec2[]): Vec2 {
+  const ok = (p: Vec2): boolean =>
+    placed.every((q) => Math.hypot(q.x - p.x, q.y - p.y) >= 3.4) &&
+    !map.isOnRoad(p) &&
+    !map.nodes.some((_, i) => map.inNodeArea(i, p));
+  for (const k of [0, 1, 2, 3, 4, -1, -2]) {
+    const p = { x: pos.x + away.x * 3.4 * k, y: pos.y + away.y * 3.4 * k };
+    if (ok(p)) return p;
+  }
+  return pos;
+}
 
 function isMinor(mainAxis: 'h' | 'v' | undefined, side: Dir): boolean {
   const main: readonly Dir[] = mainAxis === 'h' ? ['E', 'W'] : ['N', 'S'];

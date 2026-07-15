@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { obbIntersect, type OBB } from '../src/game/Collision';
-import { HALF_ROAD, ROUNDABOUT_R, STOP_LINE_OFFSET } from '../src/game/CityMap';
+import { CityMap, HALF_ROAD, ROUNDABOUT_R, STOP_LINE_OFFSET } from '../src/game/CityMap';
 import { mulberry32 } from '../src/game/rng';
 import { Traffic } from '../src/game/Traffic';
 import type { ActorView } from '../src/game/Rules';
@@ -71,6 +71,40 @@ describe('Traffic: светофор', () => {
     }
     expect(crossedAt).toBeGreaterThan(9);
     expect(crossedAt).toBeLessThan(16);
+  });
+
+  it('жёлтый, заставший NPC за стоп-линией, не бросает его посреди проезда', () => {
+    // прямая улица W→E с светофором в центре; жёлтый для подъезда W
+    // включается на t=1.4 — бампер NPC пересекает линию ещё на зелёный,
+    // центр — уже на жёлтый. Раньше NPC мгновенно замирал носом в квадрате
+    // до следующего зелёного и запирал перекрёсток взаимным «после вас»
+    // (клинч на сиде 369989378): манёвр, начатый с разрешением, надо ДОВОДИТЬ.
+    const map = new CityMap({
+      nodes: [
+        { x: 0, y: 0, control: 'lights', lightOffset: 16.6 },
+        { x: -100, y: 0 },
+        { x: 100, y: 0 },
+      ],
+      edges: [
+        { a: 1, b: 0 },
+        { a: 0, b: 2 },
+      ],
+    });
+    const tr = new Traffic(map, mulberry32(2), {
+      vehicles: [{ kind: 'car', edge: 0, dirSign: 1, along: 92 }],
+    });
+    const stopX = -HALF_ROAD - STOP_LINE_OFFSET; // -5.5
+    let frozenPastLine = false;
+    let crossed = false;
+    for (let t = 0; t < 12; t += DT) {
+      tr.update(DT, t, null);
+      const v = tr.vehicleViews()[0];
+      const frontX = v.x + v.length / 2;
+      if (Math.abs(v.speed) < 0.05 && frontX > stopX + 0.2 && v.x < HALF_ROAD) frozenPastLine = true;
+      if (v.x > HALF_ROAD + 2) crossed = true;
+    }
+    expect(frozenPastLine, 'NPC замер за стоп-линией').toBe(false);
+    expect(crossed, 'NPC не завершил проезд').toBe(true);
   });
 });
 
@@ -293,6 +327,37 @@ describe('Traffic: клаксон (детекция всегда активна,
       honks += tr.consumeHonks().length;
     }
     expect(honks).toBe(0);
+  });
+});
+
+describe('Traffic: полоса при повороте на односторонку', () => {
+  it('левый поворот: NPC выезжает в левую полосу и перестраивается вправо', () => {
+    // Т-образный тупик маршрута: с севера можно только налево на восточную
+    // односторонку — тк. 43 требует выезда в ЛЕВУЮ полосу
+    const map = new CityMap({
+      nodes: [{ x: 0, y: 0 }, { x: 0, y: -100 }, { x: 100, y: 0 }],
+      edges: [
+        { a: 1, b: 0 },
+        { a: 0, b: 2, oneWay: true },
+      ],
+    });
+    const tr = new Traffic(map, mulberry32(1), {
+      vehicles: [{ kind: 'car', edge: 0, dirSign: 1, along: 60 }],
+    });
+    let sawLeftLane = false;
+    let mergedBack = false;
+    for (let t = 0; t < 30; t += DT) {
+      tr.update(DT, t, null);
+      const v = tr.vehicleViews()[0];
+      expect(map.isOnRoad({ x: v.x, y: v.y }), `NPC вне дороги: ${v.x},${v.y}`).toBe(true);
+      if (v.x > 5 && v.x < 9 && v.y < -1) sawLeftLane = true;
+      if (v.x > 45) {
+        mergedBack = true;
+        expect(v.y, `не перестроился вправо (x=${v.x.toFixed(1)})`).toBeCloseTo(2.25, 1);
+      }
+    }
+    expect(sawLeftLane, 'NPC не вышел в левую полосу').toBe(true);
+    expect(mergedBack).toBe(true);
   });
 });
 

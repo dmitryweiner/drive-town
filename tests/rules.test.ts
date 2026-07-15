@@ -445,6 +445,102 @@ describe('Rules: встречка и односторонка', () => {
   });
 });
 
+describe('Rules: поворот в свою полосу (односторонка)', () => {
+  // e1 (на восток) односторонняя: две полосы восточного направления.
+  // ПДД Израиля: тк. 42 — правый поворот завершается в правой полосе,
+  // тк. 43 — левый на односторонку — в левой.
+  function southRun(y0: number, y1: number, x: number, speed: number): { x: number; y: number; heading: number; speed: number }[] {
+    const steps: { x: number; y: number; heading: number; speed: number }[] = [];
+    for (let y = y0; y <= y1; y += speed * 0.05) steps.push({ x, y, heading: S, speed });
+    return steps;
+  }
+  function eastRun(x0: number, x1: number, y: number, speed: number): { x: number; y: number; heading: number; speed: number }[] {
+    const steps: { x: number; y: number; heading: number; speed: number }[] = [];
+    for (let x = x0; x <= x1; x += speed * 0.05) steps.push({ x, y, heading: E, speed });
+    return steps;
+  }
+
+  it('левый поворот в правую (дальнюю) полосу — нарушение', () => {
+    const map = cross({ oneWayE: true });
+    const mon = new RuleMonitor(map);
+    const steps = [
+      ...southRun(-20, -6, -2.25, 5),
+      { x: -2, y: -3.5, heading: 1.2, speed: 4 },
+      { x: -1, y: -1.5, heading: 0.9, speed: 4 },
+      { x: 0.5, y: 0.2, heading: 0.6, speed: 4 },
+      { x: 2.5, y: 1.5, heading: 0.3, speed: 4 },
+      { x: 4.4, y: 2.1, heading: 0.1, speed: 4 },
+      ...eastRun(6, 25, 2.25, 5),
+    ];
+    const vs = drive(mon, steps);
+    expect(vs.filter((v) => v === 'turn-lane')).toHaveLength(1);
+  });
+
+  it('левый поворот в левую полосу (по turnPath) — чисто', () => {
+    const map = cross({ oneWayE: true });
+    const mon = new RuleMonitor(map);
+    const vs = drive(mon, [
+      ...southRun(-20, -8, -2.25, 5),
+      ...pathSteps(map.turnPath(0, 0, 1), 4),
+      ...eastRun(6, 25, -2.25, 5),
+    ]);
+    expect(vs).not.toContain('turn-lane');
+    expect(vs).not.toContain('wrong-way');
+  });
+
+  it('правый поворот в левую (дальнюю) полосу — нарушение', () => {
+    const map = cross({ oneWayE: true });
+    const mon = new RuleMonitor(map);
+    const steps = [
+      ...northRun(20, 6, 5),
+      { x: 2.5, y: 3, heading: -1.1, speed: 4 },
+      { x: 3.5, y: 0.5, heading: -0.7, speed: 4 },
+      { x: 4.4, y: -1.2, heading: -0.35, speed: 4 },
+      ...eastRun(6, 25, -2.25, 5),
+    ];
+    const vs = drive(mon, steps);
+    expect(vs.filter((v) => v === 'turn-lane')).toHaveLength(1);
+  });
+
+  it('правый поворот в правую полосу (по turnPath) — чисто', () => {
+    const map = cross({ oneWayE: true });
+    const mon = new RuleMonitor(map);
+    const vs = drive(mon, [
+      ...northRun(20, 8, 5),
+      ...pathSteps(map.turnPath(0, 2, 1), 4),
+      ...eastRun(6, 25, 2.25, 5),
+    ]);
+    expect(vs).not.toContain('turn-lane');
+  });
+
+  it('на двусторонней выезд в свою полосу не судится', () => {
+    const map = cross();
+    const mon = new RuleMonitor(map);
+    const steps = [
+      ...southRun(-20, -6, -2.25, 5),
+      { x: -2, y: -3.5, heading: 1.2, speed: 4 },
+      { x: -1, y: -1.5, heading: 0.9, speed: 4 },
+      { x: 0.5, y: 0.2, heading: 0.6, speed: 4 },
+      { x: 2.5, y: 1.5, heading: 0.3, speed: 4 },
+      { x: 4.4, y: 2.1, heading: 0.1, speed: 4 },
+      ...eastRun(6, 25, 2.25, 5),
+    ];
+    expect(drive(mon, steps)).not.toContain('turn-lane');
+  });
+
+  it('выезд с кольца на односторонку правой полосой — не нарушение', () => {
+    const map = cross({ control: 'roundabout', oneWayE: true });
+    const mon = new RuleMonitor(map);
+    // с севера через кольцо на восток: ringPath выводит в правую полосу
+    const vs = drive(mon, [
+      ...southRun(-20, -9.5, -2.25, 5),
+      ...pathSteps(map.turnPath(0, 0, 1), 4),
+      ...eastRun(10, 30, 2.25, 5),
+    ]);
+    expect(vs).not.toContain('turn-lane');
+  });
+});
+
 describe('Rules: пешеходы', () => {
   it('въезд на зебру при пешеходе на проезжей части — нарушение', () => {
     const map = cross({ crosswalkS: true });

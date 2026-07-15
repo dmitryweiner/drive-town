@@ -370,6 +370,12 @@ export class CityMap {
     const cross = f.x * o.y - f.y * o.x;
     const sgn = cross > 0 ? 1 : -1; // >0 — правый поворот
     const R = sgn > 0 ? 4.5 : 5.5;
+    // тк. 43 ПДД Израиля: левый поворот на односторонку (две полосы одного
+    // направления) завершается в ЛЕВОЙ полосе; правый (тк. 42) — в правой
+    if (sgn < 0 && this.edges[outEdgeId].oneWay) {
+      exit.x -= ro.x * 2 * LANE_OFF;
+      exit.y -= ro.y * 2 * LANE_OFF;
+    }
     // центр дуги — пересечение осей полос, смещённых на R в сторону поворота
     const c = lineIntersect(
       { x: entry.x + rf.x * R * sgn, y: entry.y + rf.y * R * sgn },

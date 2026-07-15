@@ -44,6 +44,9 @@ const ONCOMING_TTA = 6;
 const ONCOMING_DIST = 55;
 /** Дальность слежения за впереди идущим. */
 const GAP_AHEAD = 22;
+/** Перестроение к своей полосе после выезда в левую (тк. 43): м бокового
+ * смещения на метр пути. */
+const LANE_CHANGE_SLOPE = 0.25;
 const WALK_SPEED = 1.2;
 /** Клаксон «блокировки»: игрок торчит в конусе стоящего NPC дольше этого, с. */
 const HONK_BLOCKED_AFTER = 3;
@@ -189,9 +192,17 @@ class NpcVehicle {
   private edge: number;
   private dirSign: number;
   private along: number;
+  /** Боковое смещение от центра своей полосы (в сторону right по ходу):
+   * левый поворот на односторонку выводит в левую полосу (тк. 43), дальше
+   * NPC плавно перестраивается обратно. */
+  private laneOffset = 0;
   private plan: TurnPlan | null = null;
   private turnS = 0;
   private stopDone = false;
+  /** Стоп-линия пересечена с разрешением: манёвр доводится до конца,
+   * смена сигнала/помех его больше не прерывает (иначе жёлтый бросал
+   * NPC носом в квадрате — и перекрёсток вставал взаимным «после вас»). */
+  private crossCommitted = false;
   /** Индекс ЖД-переезда, перед которым остановка уже выполнена. */
   private railDone: number | null = null;
   private reservedNode: number | null = null;
@@ -339,10 +350,15 @@ class NpcVehicle {
       const u = this.map.edgeUnit(this.edge);
       const last = plan.pts[plan.pts.length - 1];
       this.along = (last.x - a.x) * u.x + (last.y - a.y) * u.y;
+      const lp = this.map.lanePoint(this.edge, this.dirSign, this.along);
+      const rt = rightOf({ x: u.x * this.dirSign, y: u.y * this.dirSign });
+      this.laneOffset = (last.x - lp.x) * rt.x + (last.y - lp.y) * rt.y;
+      if (Math.abs(this.laneOffset) < 0.05) this.laneOffset = 0;
       this.pos = { ...last };
       this.mode = 'edge';
       this.plan = null;
       this.stopDone = false;
+      this.crossCommitted = false;
       this.railDone = null;
       this.syncPose();
       return;
@@ -362,6 +378,7 @@ class NpcVehicle {
 
     if ((this.plan === null || this.plan.node !== node) && dBox < 30) {
       this.plan = this.makePlan(node, rng);
+      this.crossCommitted = false;
     }
 
     // можно ли ехать в перекрёсток
@@ -369,6 +386,8 @@ class NpcVehicle {
     if (this.plan) {
       if (dStopLine > 20) {
         allowed = true; // далеко — просто едем
+      } else if (this.crossCommitted) {
+        allowed = true; // начатый манёвр доводим; дистанцию держит followSpeed
       } else {
         const side = this.map.approachSide(node, this.edge);
         // полная остановка перед знаком «стоп»
@@ -384,6 +403,8 @@ class NpcVehicle {
         if (clear && firstInLine && arbiter.tryAcquire(node, this.id)) {
           this.reservedNode = node;
           allowed = true;
+          // бампер уже за стоп-линией — коммит: дальше не перепроверяем
+          if (dStopLine < this.size.length / 2) this.crossCommitted = true;
         }
       }
     }
@@ -405,6 +426,13 @@ class NpcVehicle {
     }
     this.speed = Math.min(target, this.speed + NPC_ACCEL * dt);
     this.along += this.speed * dt * this.dirSign;
+
+    // плавное перестроение обратно в свою полосу
+    if (this.laneOffset !== 0) {
+      const shift = Math.min(Math.abs(this.laneOffset), Math.abs(this.speed) * dt * LANE_CHANGE_SLOPE);
+      this.laneOffset -= Math.sign(this.laneOffset) * shift;
+      if (Math.abs(this.laneOffset) < 0.05) this.laneOffset = 0;
+    }
 
     // переход в дугу поворота
     if (allowed && this.plan) {
@@ -579,8 +607,13 @@ class NpcVehicle {
 
   private syncPose(): void {
     const u = this.map.edgeUnit(this.edge);
-    this.pos = this.map.lanePoint(this.edge, this.dirSign, this.along);
-    this.heading = Math.atan2(u.y * this.dirSign, u.x * this.dirSign);
+    const fwd = { x: u.x * this.dirSign, y: u.y * this.dirSign };
+    const rt = rightOf(fwd);
+    const p = this.map.lanePoint(this.edge, this.dirSign, this.along);
+    this.pos = { x: p.x + rt.x * this.laneOffset, y: p.y + rt.y * this.laneOffset };
+    // при перестроении нос слегка повёрнут в сторону своей полосы
+    const skew = this.laneOffset === 0 ? 0 : Math.atan(LANE_CHANGE_SLOPE) * (this.laneOffset < 0 ? 1 : -1);
+    this.heading = Math.atan2(fwd.y, fwd.x) + skew;
   }
 
   private advanceAlongPts(pts: Vec2[], cum: number[], s: number): void {
